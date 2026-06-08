@@ -370,6 +370,9 @@ function loadProfileData() {
 
     // Load push state
     checkPushSubscriptionState();
+
+    // Load dynamic partner/rival stats and badges
+    loadProfileInsights();
 }
 
 async function handleProfileUpdate(e) {
@@ -429,21 +432,34 @@ function setDashboardTab(tab) {
     activeDashboardTab = tab;
     const matchBtn = document.getElementById('toggle-dashboard-match');
     const rankingsBtn = document.getElementById('toggle-dashboard-rankings');
+    const playersBtn = document.getElementById('toggle-dashboard-players');
+    
     const matchView = document.getElementById('dashboard-tab-match');
     const rankingsView = document.getElementById('dashboard-tab-rankings');
+    const playersView = document.getElementById('dashboard-tab-players');
+
+    // Hide all
+    if (matchView) matchView.classList.add('hidden');
+    if (rankingsView) rankingsView.classList.add('hidden');
+    if (playersView) playersView.classList.add('hidden');
+
+    // Reset button states
+    if (matchBtn) matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm";
+    if (rankingsBtn) rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm";
+    if (playersBtn) playersBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm admin-only";
 
     if (tab === 'match') {
-        matchView.classList.remove('hidden');
-        rankingsView.classList.add('hidden');
-        matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container";
-        rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background";
+        if (matchView) matchView.classList.remove('hidden');
+        if (matchBtn) matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm";
         loadDashboardData();
-    } else {
-        rankingsView.classList.remove('hidden');
-        matchView.classList.add('hidden');
-        rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container";
-        matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background";
+    } else if (tab === 'rankings') {
+        if (rankingsView) rankingsView.classList.remove('hidden');
+        if (rankingsBtn) rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm";
         loadLeaderboardData();
+    } else if (tab === 'players') {
+        if (playersView) playersView.classList.remove('hidden');
+        if (playersBtn) playersBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm admin-only";
+        loadAdminPlayersData();
     }
 }
 
@@ -958,6 +974,14 @@ function populateActiveMatches(matches) {
 
         const isDraft = m.is_draft || false;
 
+        const p1Id = m.player1.id !== undefined ? m.player1.id : m.player1;
+        const p2Id = m.player2.id !== undefined ? m.player2.id : m.player2;
+        const p3Id = m.player3.id !== undefined ? m.player3.id : m.player3;
+        const p4Id = m.player4.id !== undefined ? m.player4.id : m.player4;
+        const isPlayerInMatch = currentUser && [p1Id, p2Id, p3Id, p4Id].includes(currentUser.id);
+        const isScored = m.team_a_score !== null && m.team_b_score !== null && m.team_a_score !== undefined && m.team_b_score !== undefined;
+        const canUserScore = currentUser && !isDraft && (currentUser.is_admin || (isPlayerInMatch && !isScored));
+
         card.innerHTML = `
             <div class="flex justify-between items-center border-b-2 border-on-background pb-3">
                 <h4 class="font-headline-md text-headline-md uppercase text-secondary">Court ${m.court}</h4>
@@ -981,18 +1005,18 @@ function populateActiveMatches(matches) {
             <!-- Score panel -->
             <div class="border-t-2 border-dashed border-outline-variant pt-4 flex justify-between items-center">
                 <span class="font-label-bold text-label-bold uppercase">Scores:</span>
-                ${currentUser && currentUser.is_admin && !isDraft ? `
+                ${canUserScore ? `
                     <div class="flex items-center gap-2">
-                        <input type="number" id="score-a-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_a_score || 0}">
+                        <input type="number" id="score-a-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_a_score !== null ? m.team_a_score : 0}">
                         <span class="font-bold">:</span>
-                        <input type="number" id="score-b-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_b_score || 0}">
+                        <input type="number" id="score-b-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_b_score !== null ? m.team_b_score : 0}">
                         <button class="bg-primary-container border-2 border-on-background p-1 active-press" onclick="saveMatchScore(${m.id})">
                             <span class="material-symbols-outlined text-sm">save</span>
                         </button>
                     </div>
                 ` : `
                     <div class="font-headline-md font-bold text-on-secondary-container">
-                        ${m.team_a_score !== null && m.team_b_score !== null ? `${m.team_a_score} : ${m.team_b_score}` : 'Pending Play'}
+                        ${isScored ? `${m.team_a_score} : ${m.team_b_score}` : 'Pending Play'}
                     </div>
                 `}
             </div>
@@ -1264,6 +1288,209 @@ function urlB64ToUint8Array(base64String) {
     }
     return outputArray;
 }
+
+// ==========================================
+// 6b. COMMUNITY PACK FEATURES
+// ==========================================
+let allPlayersData = [];
+
+async function loadAdminPlayersData() {
+    try {
+        const res = await fetch(`${API_URL}/api/admin/players`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        allPlayersData = data.players || [];
+
+        const container = document.getElementById('admin-players-rows-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (allPlayersData.length === 0) {
+            container.innerHTML = `<tr><td colspan="4" class="p-4 text-center font-bold uppercase">No players found</td></tr>`;
+            return;
+        }
+
+        allPlayersData.forEach(p => {
+            const tr = document.createElement('tr');
+            tr.className = "border-b border-outline-variant hover:bg-surface-container-low transition-colors";
+
+            const avatarHtml = p.picture_path 
+                ? `<img class="w-8 h-8 rounded-full object-cover inline-block mr-2 border border-on-background" src="${p.picture_path}">`
+                : `<span class="material-symbols-outlined text-xl inline-block mr-2 opacity-50">account_circle</span>`;
+
+            tr.innerHTML = `
+                <td class="p-4 flex items-center font-headline-md text-sm uppercase">${avatarHtml} ${p.name}</td>
+                <td class="p-4 font-body-md">${p.email}</td>
+                <td class="p-4 uppercase">${p.gender}</td>
+                <td class="p-4 uppercase">Level ${p.level}</td>
+            `;
+            container.appendChild(tr);
+        });
+    } catch (err) {
+        console.error('Failed to load admin players list:', err.message);
+    }
+}
+window.loadAdminPlayersData = loadAdminPlayersData;
+
+function exportPlayersCSV() {
+    if (!allPlayersData || allPlayersData.length === 0) {
+        alert("No players data to export.");
+        return;
+    }
+
+    // Define header
+    const headers = ['Name', 'Email', 'Gender', 'Level'];
+    const rows = allPlayersData.map(p => [
+        p.name,
+        p.email,
+        p.gender,
+        `Level ${p.level}`
+    ]);
+
+    // Build CSV content
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `players_directory_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+window.exportPlayersCSV = exportPlayersCSV;
+
+function showQRCodeModal() {
+    const modal = document.getElementById('qr-modal');
+    const img = document.getElementById('qr-image');
+    if (modal && img) {
+        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(window.location.origin)}`;
+        modal.classList.remove('hidden');
+    }
+}
+window.showQRCodeModal = showQRCodeModal;
+
+function closeQRCodeModal() {
+    const modal = document.getElementById('qr-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+window.closeQRCodeModal = closeQRCodeModal;
+
+async function loadProfileInsights() {
+    try {
+        const res = await fetch(`${API_URL}/api/players/me/insights`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        const container = document.getElementById('profile-insights-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        // Win streak element
+        const streakHtml = `
+            <div class="border-2 border-on-background p-4 brutalist-shadow bg-surface-container-lowest flex flex-col gap-2">
+                <h4 class="font-headline-sm text-headline-sm uppercase text-primary">Win Streaks</h4>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="border-2 border-on-background p-3 bg-white text-center">
+                        <div class="font-label-bold text-xs uppercase opacity-75">Current Streak</div>
+                        <div class="font-headline-lg text-3xl font-black">${data.currentStreak || 0} 🔥</div>
+                    </div>
+                    <div class="border-2 border-on-background p-3 bg-white text-center">
+                        <div class="font-label-bold text-xs uppercase opacity-75">Max Streak</div>
+                        <div class="font-headline-lg text-3xl font-black">${data.maxStreak || 0} 🏆</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Partner / Rival elements
+        let partnerHtml = '';
+        if (data.bestPartner) {
+            partnerHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-between">
+                    <div>
+                        <div class="font-label-bold text-xs uppercase opacity-75 text-secondary">Best Partner</div>
+                        <div class="font-headline-md text-xl uppercase mt-1">${data.bestPartner.name}</div>
+                    </div>
+                    <div class="mt-4 border-t-2 border-on-background pt-2 flex justify-between items-center text-sm font-label-bold">
+                        <span>Win Rate:</span>
+                        <span class="text-green-700">${data.bestPartner.winRate}% (${data.bestPartner.wins}/${data.bestPartner.played})</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            partnerHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-center items-center text-center py-6">
+                    <span class="material-symbols-outlined text-4xl opacity-30">group</span>
+                    <div class="font-label-bold text-xs uppercase opacity-75 mt-2">No Partner Stats</div>
+                </div>
+            `;
+        }
+
+        let rivalHtml = '';
+        if (data.toughestRival) {
+            rivalHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-between">
+                    <div>
+                        <div class="font-label-bold text-xs uppercase opacity-75 text-red-700">Toughest Rival</div>
+                        <div class="font-headline-md text-xl uppercase mt-1">${data.toughestRival.name}</div>
+                    </div>
+                    <div class="mt-4 border-t-2 border-on-background pt-2 flex justify-between items-center text-sm font-label-bold">
+                        <span>Win Rate vs Them:</span>
+                        <span class="text-red-700">${data.toughestRival.winRateAgainst}% (${data.toughestRival.played - data.toughestRival.losses}/${data.toughestRival.played})</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            rivalHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-center items-center text-center py-6">
+                    <span class="material-symbols-outlined text-4xl opacity-30">sports_tennis</span>
+                    <div class="font-label-bold text-xs uppercase opacity-75 mt-2">No Rival Stats</div>
+                </div>
+            `;
+        }
+
+        // Achievements/Badges
+        let badgesHtml = '';
+        if (data.badges && data.badges.length > 0) {
+            badgesHtml = `
+                <div class="border-2 border-on-background p-4 brutalist-shadow bg-surface-container-lowest flex flex-col gap-2">
+                    <h4 class="font-headline-sm text-headline-sm uppercase text-secondary">Achievements</h4>
+                    <div class="flex flex-wrap gap-2">
+                        ${data.badges.map(b => `
+                            <span class="bg-primary-container text-on-primary-container border-2 border-on-background px-3 py-1 font-label-bold text-xs uppercase brutalist-shadow">
+                                ${b}
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        container.innerHTML = `
+            ${streakHtml}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${partnerHtml}
+                ${rivalHtml}
+            </div>
+            ${badgesHtml}
+        `;
+    } catch (err) {
+        console.error('Failed to load profile insights:', err.message);
+    }
+}
+window.loadProfileInsights = loadProfileInsights;
+
 
 // ==========================================
 // 7. INITIALIZATION ON LOAD

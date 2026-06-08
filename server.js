@@ -1060,8 +1060,8 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
   }
 });
 
-// Update match scores (Admin only)
-app.put('/api/matches/:id/score', authenticateToken, requireAdmin, async (req, res) => {
+// Update match scores (Admin or Player in the match)
+app.put('/api/matches/:id/score', authenticateToken, async (req, res) => {
   const matchId = req.params.id;
   const { team_a_score, team_b_score } = req.body;
 
@@ -1070,11 +1070,148 @@ app.put('/api/matches/:id/score', authenticateToken, requireAdmin, async (req, r
   }
 
   try {
+    const match = await db.get('SELECT * FROM matches WHERE id = ?', [matchId]);
+    if (!match) return res.status(404).json({ error: 'Match not found' });
+
+    const isPlayerInMatch = [match.player1, match.player2, match.player3, match.player4].includes(req.user.id);
+    if (!req.user.is_admin && !isPlayerInMatch) {
+      return res.status(403).json({ error: 'You are not authorized to update this match score.' });
+    }
+
     await db.run(
       'UPDATE matches SET team_a_score = ?, team_b_score = ? WHERE id = ?',
       [team_a_score, team_b_score, matchId]
     );
     res.json({ message: 'Score updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all registered players (Admin only)
+app.get('/api/admin/players', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const players = await db.all('SELECT id, name, username as email, gender, level, picture_path FROM players WHERE is_admin = 0 ORDER BY name ASC');
+    res.json({ players });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get player-specific insights and partnership stats (Authenticated user)
+app.get('/api/players/me/insights', authenticateToken, async (req, res) => {
+  const playerId = req.user.id;
+  try {
+    const matches = await db.all(`
+      SELECT m.*, 
+        p1.name as p1_name, p2.name as p2_name, p3.name as p3_name, p4.name as p4_name
+      FROM matches m
+      JOIN players p1 ON m.player1 = p1.id
+      JOIN players p2 ON m.player2 = p2.id
+      JOIN players p3 ON m.player3 = p3.id
+      JOIN players p4 ON m.player4 = p4.id
+      WHERE m.team_a_score IS NOT NULL AND m.team_b_score IS NOT NULL
+        AND (m.player1 = ? OR m.player2 = ? OR m.player3 = ? OR m.player4 = ?)
+      ORDER BY m.session_id ASC, m.round_number ASC
+    `, [playerId, playerId, playerId, playerId]);
+
+    const partners = {}; // partnerId -> { name, played, wins }
+    const opponents = {}; // opponentId -> { name, played, wins_against }
+    let currentStreak = 0;
+    let maxStreak = 0;
+
+    matches.forEach(m => {
+      let isTeamA = (m.player1 === playerId || m.player2 === playerId);
+      let won = false;
+      if (isTeamA) {
+        won = m.team_a_score > m.team_b_score;
+      } else {
+        won = m.team_b_score > m.team_a_score;
+      }
+
+      if (won) {
+        currentStreak++;
+        if (currentStreak > maxStreak) maxStreak = currentStreak;
+      } else {
+        currentStreak = 0;
+      }
+
+      // Partner
+      let partnerId, partnerName;
+      if (m.player1 === playerId) { partnerId = m.player2; partnerName = m.p2_name; }
+      else if (m.player2 === playerId) { partnerId = m.player1; partnerName = m.p1_name; }
+      else if (m.player3 === playerId) { partnerId = m.player4; partnerName = m.p4_name; }
+      else { partnerId = m.player3; partnerName = m.p3_name; }
+
+      if (!partners[partnerId]) {
+        partners[partnerId] = { name: partnerName, played: 0, wins: 0 };
+      }
+      partners[partnerId].played++;
+      if (won) partners[partnerId].wins++;
+
+      // Opponents
+      let ops = [];
+      if (isTeamA) {
+        ops = [{ id: m.player3, name: m.p3_name }, { id: m.player4, name: m.p4_name }];
+      } else {
+        ops = [{ id: m.player1, name: m.p1_name }, { id: m.player2, name: m.p2_name }];
+      }
+
+      ops.forEach(op => {
+        if (!opponents[op.id]) {
+          opponents[op.id] = { name: op.name, played: 0, wins_against: 0 };
+        }
+        opponents[op.id].played++;
+        if (won) opponents[op.id].wins_against++;
+      });
+    });
+
+    // Best Partner: partner with highest win rate (min 1 match, break ties by most played, then wins)
+    let bestPartner = null;
+    let bestPartnerWinRate = -1;
+    for (const pid in partners) {
+      const p = partners[pid];
+      const winRate = p.wins / p.played;
+      if (winRate > bestPartnerWinRate || (winRate === bestPartnerWinRate && p.played > (bestPartner?.played || 0))) {
+        bestPartnerWinRate = winRate;
+        bestPartner = { name: p.name, winRate: Math.round(winRate * 100), played: p.played, wins: p.wins };
+      }
+    }
+
+    // Toughest Rival: opponent with lowest win rate against them (meaning we lost most to them)
+    let toughestRival = null;
+    let toughestRivalWinRate = 2; // high number
+    for (const oid in opponents) {
+      const op = opponents[oid];
+      const winRate = op.wins_against / op.played;
+      if (winRate < toughestRivalWinRate || (winRate === toughestRivalWinRate && op.played > (toughestRival?.played || 0))) {
+        toughestRivalWinRate = winRate;
+        toughestRival = { name: op.name, winRateAgainst: Math.round(winRate * 100), played: op.played, losses: op.played - op.wins_against };
+      }
+    }
+
+    // Dynamic Achievements
+    const badges = [];
+    if (matches.length > 0) badges.push("Toss Enthusiast 🎾");
+    if (matches.length >= 5) badges.push("Toss Regular 🏆");
+    const totalWins = matches.filter(m => {
+      let isTeamA = (m.player1 === playerId || m.player2 === playerId);
+      return isTeamA ? m.team_a_score > m.team_b_score : m.team_b_score > m.team_a_score;
+    }).length;
+    if (totalWins > 0) badges.push("Winner's Circle 🥇");
+    if (maxStreak >= 3) badges.push("On Fire 🔥");
+    const totalWinRate = matches.length > 0 ? (totalWins / matches.length) : 0;
+    if (matches.length >= 3 && totalWinRate >= 0.6) badges.push("Elite Competitor ⚡");
+
+    res.json({
+      totalPlayed: matches.length,
+      totalWins,
+      currentStreak,
+      maxStreak,
+      bestPartner,
+      toughestRival,
+      badges
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -449,6 +449,11 @@
                     </button>
                 </div>
             </form>
+            
+            <!-- Player Partnership Stats & Insights -->
+            <div id="profile-insights-container" class="mt-12 space-y-6">
+                <!-- Populated dynamically -->
+            </div>
         </div>
 
         <!-- ==========================================
@@ -497,10 +502,11 @@
             <div class="mb-12">
                 <h2 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg uppercase mb-4">Dashboard</h2>
                 
-                <!-- Display Leaderboard vs Active Session -->
-                <div class="flex brutalist-border overflow-hidden mb-6 max-w-md">
-                    <button id="toggle-dashboard-match" class="flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container" onclick="setDashboardTab('match')">Active Session</button>
-                    <button id="toggle-dashboard-rankings" class="flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background" onclick="setDashboardTab('rankings')">Leaderboard</button>
+                <!-- Display Leaderboard vs Active Session vs Registered Players -->
+                <div class="flex brutalist-border overflow-hidden mb-6 max-w-lg">
+                    <button id="toggle-dashboard-match" class="flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm" onclick="setDashboardTab('match')">Active Session</button>
+                    <button id="toggle-dashboard-rankings" class="flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm" onclick="setDashboardTab('rankings')">Leaderboard</button>
+                    <button id="toggle-dashboard-players" class="flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm admin-only hidden" onclick="setDashboardTab('players')">Players Directory</button>
                 </div>
             </div>
 
@@ -509,7 +515,10 @@
                 <!-- Admin Roster Approval Panel -->
                 <section class="border-heavy-border border-on-background bg-surface-container-lowest brutalist-shadow-lg overflow-hidden admin-only hidden">
                     <div class="p-6 border-b-2 border-on-background flex flex-col md:flex-row justify-between items-start md:items-center bg-white gap-4">
-                        <h3 class="font-headline-md text-headline-md uppercase">Checked-In Players</h3>
+                        <div class="flex items-center gap-3">
+                            <h3 class="font-headline-md text-headline-md uppercase">Checked-In Players</h3>
+                            <button class="bg-primary-container border-2 border-on-background px-3 py-1 font-label-bold text-[10px] uppercase brutalist-shadow active-press" onclick="showQRCodeModal()">Show Check-In QR</button>
+                        </div>
                         <div class="flex flex-wrap gap-2 w-full sm:w-auto">
                             <button class="flex-1 sm:flex-initial bg-primary-container border-2 border-on-background text-on-primary-container px-4 py-3 md:px-3 md:py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-primary transition-all text-sm md:text-xs text-center" onclick="manuallyAddPlayerPrompt()">Add Player</button>
                             <button class="flex-1 sm:flex-initial bg-surface border-2 border-on-background text-on-surface px-4 py-3 md:px-3 md:py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-surface-variant transition-all text-sm md:text-xs text-center" onclick="fillRoster16()">Fill 16</button>
@@ -649,6 +658,33 @@
                     </div>
                 </section>
             </div>
+
+            <!-- Admin Players Directory View -->
+            <div id="dashboard-tab-players" class="space-y-8 hidden admin-only">
+                <section class="border-heavy-border border-on-background bg-surface-container-lowest brutalist-shadow-lg overflow-hidden">
+                    <div class="p-6 border-b-2 border-on-background bg-white flex justify-between items-center flex-wrap gap-4">
+                        <h3 class="font-headline-md text-headline-md uppercase">Players Directory</h3>
+                        <button class="bg-secondary border-2 border-on-background text-white px-4 py-2 font-label-bold text-label-sm uppercase brutalist-shadow brutalist-button-press active-press" onclick="exportPlayersCSV()">
+                            Export CSV
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-surface border-b-2 border-on-background">
+                                    <th class="p-4 font-label-bold text-label-bold uppercase">Player</th>
+                                    <th class="p-4 font-label-bold text-label-bold uppercase">Email (Username)</th>
+                                    <th class="p-4 font-label-bold text-label-bold uppercase">Gender</th>
+                                    <th class="p-4 font-label-bold text-label-bold uppercase">Level</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-players-rows-container">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
         </div>
 
         <!-- Bento Footer -->
@@ -707,6 +743,20 @@
             <span class="font-label-bold text-label-bold uppercase">Check In For Toss</span>
         </div>
     </button>
+
+    <!-- QR Code Modal (Admin Check-in) -->
+    <div id="qr-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center hidden p-gutter">
+        <div class="bg-white brutalist-border-heavy p-6 max-w-sm w-full heavy-brutalist-shadow flex flex-col gap-4 text-center text-on-surface">
+            <h3 class="font-headline-md text-headline-md uppercase">Session Check-In QR</h3>
+            <p class="font-body-md text-body-md">Scan to instantly check in for the toss session.</p>
+            <div class="flex justify-center border-2 border-on-background p-4 bg-surface-container">
+                <img id="qr-image" class="w-48 h-48 bg-white" src="" alt="QR Code">
+            </div>
+            <button class="bg-red-700 text-white border-2 border-on-background py-3 font-label-bold text-label-bold uppercase brutalist-shadow active-press" onclick="closeQRCodeModal()">
+                Close
+            </button>
+        </div>
+    </div>
 
     <!-- App Script -->
     <script src="/app.js"></script>
