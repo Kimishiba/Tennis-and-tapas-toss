@@ -988,7 +988,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Register Service Worker
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js')
+        navigator.serviceWorker.register('/sw.js?v=3')
             .then(reg => {
                 console.log('Service Worker registered successfully:', reg.scope);
                 checkPushSubscriptionState();
