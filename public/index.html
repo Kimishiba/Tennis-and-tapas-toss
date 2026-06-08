@@ -507,14 +507,15 @@
             <!-- Roster & Active Match views -->
             <div id="dashboard-tab-match" class="space-y-8">
                 <!-- Roster counters -->
+                <!-- Roster counters -->
                 <div class="flex flex-wrap gap-4" id="dashboard-counters">
-                    <div class="bg-primary-container border-heavy-border border-on-background rounded-full aspect-square flex flex-col items-center justify-center relative overflow-hidden brutalist-shadow flex-1 min-w-[200px]">
-                        <p class="font-label-bold text-label-bold uppercase relative z-10">Active Session</p>
-                        <p class="font-display-xl text-3xl md:text-5xl relative z-10" id="session-date-banner">None</p>
+                    <div class="bg-primary-container brutalist-border-heavy flex flex-col justify-center p-6 relative overflow-hidden brutalist-shadow flex-1 min-w-[200px] h-32">
+                        <p class="font-label-bold text-label-bold uppercase relative z-10 text-on-primary-container">Active Session</p>
+                        <p class="font-headline-md text-xl md:text-2xl relative z-10" id="session-date-banner">None</p>
                     </div>
-                    <div class="bg-secondary-container border-heavy-border border-on-background rounded-full aspect-square flex flex-col items-center justify-center relative overflow-hidden brutalist-shadow flex-1 min-w-[200px]">
+                    <div class="bg-secondary-container brutalist-border-heavy flex flex-col justify-center p-6 relative overflow-hidden brutalist-shadow flex-1 min-w-[200px] h-32">
                         <p class="font-label-bold text-label-bold uppercase text-on-secondary-container relative z-10">Checked In</p>
-                        <p class="font-display-xl text-4xl md:text-6xl text-on-secondary-container relative z-10" id="session-checkins-banner">0</p>
+                        <p class="font-display-xl text-3xl md:text-4xl text-on-secondary-container relative z-10" id="session-checkins-banner">0</p>
                     </div>
                 </div>
 
@@ -534,9 +535,10 @@
 
                 <!-- Admin Pairing Generator Controls -->
                 <section class="border-heavy-border border-on-background bg-surface-container p-6 brutalist-shadow admin-only hidden" id="admin-pairing-panel">
-                    <h3 class="font-headline-md text-headline-md uppercase mb-4">Round Generator</h3>
+                    <h3 class="font-headline-md text-headline-md uppercase mb-2">Round Generator</h3>
+                    <p id="admin-pairing-status" class="font-label-bold text-label-sm uppercase mb-4 text-red-700"></p>
                     <div class="flex flex-col md:flex-row gap-4">
-                        <button class="flex-1 bg-primary-container border-2 border-on-background p-4 font-label-bold text-label-bold uppercase brutalist-shadow brutalist-button-press" onclick="generateRoundDraft()">
+                        <button id="admin-generate-btn" class="flex-1 bg-primary-container border-2 border-on-background p-4 font-label-bold text-label-bold uppercase brutalist-shadow brutalist-button-press disabled:opacity-50 disabled:pointer-events-none" onclick="generateRoundDraft()">
                             Generate Next Draft Round
                         </button>
                         <button id="admin-publish-btn" class="flex-1 bg-secondary border-2 border-on-background text-white p-4 font-label-bold text-label-bold uppercase brutalist-shadow brutalist-button-press hidden" onclick="publishActiveRound()">

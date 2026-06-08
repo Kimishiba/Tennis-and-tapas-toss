@@ -528,16 +528,27 @@ async function togglePlayerApproval(playerId, status) {
 }
 
 function populateAdminPairingControls(signups) {
-    const approvedCount = signups.filter(s => s.status === 'approved').length;
+    const approvedCount = signups ? signups.filter(s => s.status === 'approved').length : 0;
     const adminPanel = document.getElementById('admin-pairing-panel');
     const completeContainer = document.getElementById('admin-complete-session-container');
+    const generateBtn = document.getElementById('admin-generate-btn');
+    const statusEl = document.getElementById('admin-pairing-status');
+
+    if (adminPanel) adminPanel.classList.remove('hidden');
+    if (completeContainer) completeContainer.classList.remove('hidden');
 
     if (approvedCount === 16) {
-        adminPanel.classList.remove('hidden');
-        completeContainer.classList.remove('hidden');
+        if (generateBtn) generateBtn.disabled = false;
+        if (statusEl) {
+            statusEl.textContent = "Roster is complete! Ready to generate pairings.";
+            statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-green-700";
+        }
     } else {
-        adminPanel.classList.add('hidden');
-        completeContainer.classList.add('hidden');
+        if (generateBtn) generateBtn.disabled = true;
+        if (statusEl) {
+            statusEl.textContent = `Pairings require exactly 16 approved players (currently ${approvedCount} approved).`;
+            statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-red-700";
+        }
     }
 }
 
