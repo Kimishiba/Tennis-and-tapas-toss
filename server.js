@@ -786,11 +786,19 @@ app.post('/api/sessions/:id/approve', authenticateToken, requireAdmin, async (re
   }
 
   try {
-    await db.run(
-      'UPDATE signups SET status = ? WHERE session_id = ? AND player_id = ?',
-      [status, sessionId, player_id]
-    );
-    res.json({ message: `Player registration set to ${status}` });
+    if (status === 'removed') {
+      await db.run(
+        'DELETE FROM signups WHERE session_id = ? AND player_id = ?',
+        [sessionId, player_id]
+      );
+      res.json({ message: 'Player removed from roster' });
+    } else {
+      await db.run(
+        'UPDATE signups SET status = ? WHERE session_id = ? AND player_id = ?',
+        [status, sessionId, player_id]
+      );
+      res.json({ message: `Player registration set to ${status}` });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

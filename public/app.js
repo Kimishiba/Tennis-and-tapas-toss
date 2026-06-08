@@ -501,6 +501,7 @@ function populateAdminRoster(signups) {
                 <select class="bg-white border-2 border-on-background font-label-bold text-label-bold p-1 uppercase outline-none" onchange="togglePlayerApproval(${s.player_id}, this.value)">
                     <option value="pending" ${s.status === 'pending' ? 'selected' : ''}>PENDING</option>
                     <option value="approved" ${s.status === 'approved' ? 'selected' : ''}>APPROVED</option>
+                    <option value="removed">REMOVE</option>
                 </select>
             </div>
         `;
