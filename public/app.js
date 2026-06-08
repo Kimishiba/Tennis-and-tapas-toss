@@ -553,6 +553,42 @@ function populateAdminPairingControls(signups) {
     }
 }
 
+async function manuallyAddPlayerPrompt() {
+    if (!activeSession) return alert('No active session scheduled.');
+
+    const name = prompt("Enter player's full name:");
+    if (!name) return;
+
+    const gender = prompt("Enter player's gender (M or F):");
+    if (!gender || !['M', 'F'].includes(gender.toUpperCase())) {
+        return alert("Gender must be 'M' or 'F'!");
+    }
+
+    const levelStr = prompt("Enter player's tennis level (1-9):");
+    const level = parseInt(levelStr, 10);
+    if (isNaN(level) || level < 1 || level > 9) {
+        return alert("Level must be a number between 1 and 9!");
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/add-player`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ name, gender: gender.toUpperCase(), level })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        alert(`Player ${name} successfully added and approved for this session!`);
+        loadDashboardData();
+    } catch (err) {
+        alert('Failed to add player: ' + err.message);
+    }
+}
+
 async function createNewSession() {
     const sessionDate = prompt("Enter toss session date (e.g. Thursday, Jun 11, 2026):", new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }));
     if (!sessionDate) return;

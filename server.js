@@ -804,6 +804,49 @@ app.post('/api/sessions/:id/approve', authenticateToken, requireAdmin, async (re
   }
 });
 
+// Manually add player and sign them up for the session (Admin only)
+app.post('/api/sessions/:id/add-player', authenticateToken, requireAdmin, async (req, res) => {
+  const sessionId = req.params.id;
+  const { name, gender, level } = req.body;
+
+  if (!name || !gender || !level) {
+    return res.status(400).json({ error: 'Name, gender, and level are required' });
+  }
+
+  if (!['M', 'F'].includes(gender)) {
+    return res.status(400).json({ error: 'Gender must be M or F' });
+  }
+
+  const parsedLevel = parseInt(level, 10);
+  if (isNaN(parsedLevel) || parsedLevel < 1 || parsedLevel > 9) {
+    return res.status(400).json({ error: 'Level must be between 1 and 9' });
+  }
+
+  try {
+    const session = await db.get('SELECT * FROM sessions WHERE id = ?', [sessionId]);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    // Create a guest player account in players table
+    const uniqueUsername = `guest-${Date.now()}-${Math.floor(Math.random() * 1000)}@toss.com`;
+    const playerResult = await db.run(
+      'INSERT INTO players (name, gender, level, username, is_admin) VALUES (?, ?, ?, ?, 0)',
+      [name, gender, parsedLevel, uniqueUsername]
+    );
+
+    const playerId = playerResult.lastID;
+
+    // Check them in (approved) for the session
+    await db.run(
+      'INSERT INTO signups (session_id, player_id, status) VALUES (?, ?, ?)',
+      [sessionId, playerId, 'approved']
+    );
+
+    res.status(201).json({ message: 'Player created and added to session' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Round & Pairing Endpoints ---
 
 // Generate next draft round (Admin only)

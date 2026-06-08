@@ -523,7 +523,10 @@
                 <section class="border-heavy-border border-on-background bg-surface-container-lowest brutalist-shadow-lg overflow-hidden admin-only hidden">
                     <div class="p-6 border-b-2 border-on-background flex justify-between items-center bg-white">
                         <h3 class="font-headline-md text-headline-md uppercase">Checked-In Players</h3>
-                        <button class="bg-secondary border-2 border-on-background text-white px-6 py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-secondary-container transition-all" onclick="createNewSession()">New Session</button>
+                        <div class="flex gap-2">
+                            <button class="bg-primary-container border-2 border-on-background text-on-primary-container px-4 py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-primary transition-all text-xs md:text-sm" onclick="manuallyAddPlayerPrompt()">Add Player</button>
+                            <button class="bg-secondary border-2 border-on-background text-white px-4 py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-secondary-container transition-all text-xs md:text-sm" onclick="createNewSession()">New Session</button>
+                        </div>
                     </div>
                     <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6" id="admin-roster-list">
                         <!-- Populated dynamically with player signups and checkboxes for approvals -->
