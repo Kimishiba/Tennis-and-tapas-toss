@@ -553,6 +553,27 @@ function populateAdminPairingControls(signups) {
     }
 }
 
+async function fillRoster16() {
+    if (!activeSession) return alert('No active session scheduled.');
+    if (!confirm('Are you sure you want to populate this session with 16 approved test players?')) return;
+
+    try {
+        const res = await fetch(`${API_URL}/api/admin/fill-players`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        alert('Roster successfully populated with 16 approved players!');
+        loadDashboardData();
+    } catch (err) {
+        alert('Failed to fill roster: ' + err.message);
+    }
+}
+
 async function manuallyAddPlayerPrompt() {
     if (!activeSession) return alert('No active session scheduled.');
 

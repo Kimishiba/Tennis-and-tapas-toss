@@ -852,6 +852,50 @@ app.post('/api/sessions/:id/add-player', authenticateToken, requireAdmin, async 
   }
 });
 
+// Populate session with 16 approved test players (Admin only)
+app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    let session = await db.get("SELECT * FROM sessions WHERE status = 'open' OR status = 'active' ORDER BY id DESC LIMIT 1");
+    if (!session) {
+      const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+      const insertRes = await db.run("INSERT INTO sessions (date, status) VALUES (?, 'open')", [today]);
+      session = { id: insertRes.lastID, date: today, status: 'open' };
+    }
+
+    const existingPlayers = await db.all("SELECT id FROM players WHERE username != 'admin'");
+    const playersNeeded = Math.max(0, 16 - existingPlayers.length);
+    
+    if (playersNeeded > 0) {
+      const genders = ['M', 'F'];
+      for (let i = 0; i < playersNeeded; i++) {
+        const idx = existingPlayers.length + i + 1;
+        const name = `Player ${idx}`;
+        const gender = genders[i % 2];
+        const level = Math.floor(Math.random() * 9) + 1;
+        const username = `player${idx}@example.com`;
+        await db.run(
+          "INSERT INTO players (name, gender, level, username, is_admin) VALUES (?, ?, ?, ?, 0)",
+          [name, gender, level, username]
+        );
+      }
+    }
+
+    await db.run("DELETE FROM signups WHERE session_id = ?", [session.id]);
+
+    const allPlayers = await db.all("SELECT id FROM players WHERE username != 'admin' LIMIT 16");
+    for (const player of allPlayers) {
+      await db.run(
+        "INSERT INTO signups (session_id, player_id, status) VALUES (?, ?, 'approved')",
+        [session.id, player.id]
+      );
+    }
+
+    res.json({ message: 'Successfully filled session with 16 approved players' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Round & Pairing Endpoints ---
 
 // Generate next draft round (Admin only)
