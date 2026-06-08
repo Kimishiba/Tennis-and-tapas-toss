@@ -967,7 +967,7 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
       allParticipantIds.push(match.player1.id, match.player2.id, match.player3.id, match.player4.id);
     }
 
-    await db.commit();
+    await db.run('COMMIT');
 
     // Trigger Web Push Notifications in background
     // We send to all 16 players telling them their court and partners
