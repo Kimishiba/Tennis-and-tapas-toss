@@ -405,6 +405,11 @@ function requireAdmin(req, res, next) {
 
 // --- Auth Endpoints ---
 
+// Get Google Client ID config
+app.get('/api/auth/google/client-id', (req, res) => {
+  res.json({ clientId: process.env.GOOGLE_CLIENT_ID || '' });
+});
+
 // Register
 app.post('/api/auth/register', upload.single('picture'), async (req, res) => {
   const { name, gender, level, username, password } = req.body;

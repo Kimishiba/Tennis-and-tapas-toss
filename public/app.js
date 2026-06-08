@@ -233,16 +233,29 @@ function updateAuthVisibility() {
 }
 
 // Initialize Google One Tap button
-function initGoogleSignIn() {
-    if (window.google) {
-        window.google.accounts.id.initialize({
-            client_id: "your-google-client-id-here.apps.googleusercontent.com", // Replace with real client ID in production
-            callback: handleCredentialResponse
-        });
-        window.google.accounts.id.renderButton(
-            document.getElementById("google-signin-btn"),
-            { theme: "outline", size: "large", width: "100%" }
-        );
+// Initialize Google Sign-in button dynamically
+async function initGoogleSignIn() {
+    try {
+        const res = await fetch(`${API_URL}/api/auth/google/client-id`);
+        const data = await res.json();
+        if (data.clientId && window.google) {
+            window.google.accounts.id.initialize({
+                client_id: data.clientId,
+                callback: handleCredentialResponse
+            });
+            window.google.accounts.id.renderButton(
+                document.getElementById("google-signin-btn"),
+                { theme: "outline", size: "large", width: "100%" }
+            );
+        } else {
+            console.warn("Google Client ID is not configured or Google script not loaded.");
+            const btn = document.getElementById("google-signin-btn");
+            if (btn) {
+                btn.innerHTML = `<div class="p-3 text-center text-xs border border-dashed border-yellow-600 text-yellow-600 rounded bg-yellow-50">Google Login not configured. Setup GOOGLE_CLIENT_ID on server.</div>`;
+            }
+        }
+    } catch (err) {
+        console.error("Failed to load Google client ID:", err);
     }
 }
 
