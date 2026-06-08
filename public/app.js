@@ -358,7 +358,7 @@ function loadProfileData() {
         avatarImg.src = currentUser.picture_path;
         avatarImg.classList.remove('hidden');
     } else {
-        avatarImg.src = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=200&auto=format&fit=crop';
+        avatarImg.src = '/images/tennis_facility_2.png';
     }
 
     // Load push state

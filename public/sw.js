@@ -12,8 +12,8 @@ self.addEventListener('push', event => {
 
   const options = {
     body: data.body,
-    icon: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?q=80&w=200&auto=format&fit=crop', // default tennis thumbnail
-    badge: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?q=80&w=200&auto=format&fit=crop',
+    icon: '/images/tennis_facility_main.png', // default tennis thumbnail
+    badge: '/images/tennis_facility_main.png',
     vibrate: [200, 100, 200],
     data: {
       url: data.url || '/'
