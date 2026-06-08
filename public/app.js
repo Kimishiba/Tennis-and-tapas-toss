@@ -7,6 +7,7 @@ let authMode = 'register'; // register, login
 let activeDashboardTab = 'match'; // match, rankings
 let googleAuthToken = null; // Stored if Google signin succeeds but registration is incomplete
 let draftPairings = null; // Store locally generated draft matches
+let isEditingPublishedRound = false; // Flag to track if admin is modifying already published pairings
 
 const API_URL = ''; // Local backend URLs are relative
 
@@ -220,10 +221,16 @@ function updateAuthVisibility() {
         document.querySelectorAll('.anon-only').forEach(el => el.classList.add('hidden'));
         document.getElementById('profile-btn').classList.remove('hidden');
 
+        const dbLabel = document.getElementById('nav-btn-dashboard-label');
+        const dbIcon = document.getElementById('nav-btn-dashboard-icon');
         if (currentUser.is_admin) {
             document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+            if (dbLabel) dbLabel.textContent = 'DASHBOARD';
+            if (dbIcon) dbIcon.textContent = 'dashboard';
         } else {
             document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+            if (dbLabel) dbLabel.textContent = 'PROFILE';
+            if (dbIcon) dbIcon.textContent = 'person';
         }
     } else {
         document.querySelectorAll('.auth-required').forEach(el => el.classList.add('hidden'));
@@ -449,6 +456,7 @@ async function loadDashboardData() {
         
         if (data.session) {
             activeSession = data.session;
+            activeSession.matches = data.matches || [];
             document.getElementById('session-date-banner').textContent = data.session.date;
             const checkins = data.signups ? data.signups.length : 0;
             document.getElementById('session-checkins-banner').textContent = checkins;
@@ -528,6 +536,30 @@ async function togglePlayerApproval(playerId, status) {
     }
 }
 
+function saveRulePreferences() {
+    const balanceLevels = document.getElementById('rule-balance-levels')?.checked !== false;
+    const preferMixed = document.getElementById('rule-prefer-mixed')?.checked !== false;
+    const avoidRepeats = document.getElementById('rule-avoid-repeats')?.checked !== false;
+    
+    localStorage.setItem('rule_balance_levels', balanceLevels);
+    localStorage.setItem('rule_prefer_mixed', preferMixed);
+    localStorage.setItem('rule_avoid_repeats', avoidRepeats);
+}
+
+function loadRulePreferences() {
+    const balanceLevels = localStorage.getItem('rule_balance_levels') !== 'false';
+    const preferMixed = localStorage.getItem('rule_prefer_mixed') !== 'false';
+    const avoidRepeats = localStorage.getItem('rule_avoid_repeats') !== 'false';
+
+    const checkBalance = document.getElementById('rule-balance-levels');
+    const checkMixed = document.getElementById('rule-prefer-mixed');
+    const checkRepeats = document.getElementById('rule-avoid-repeats');
+
+    if (checkBalance) checkBalance.checked = balanceLevels;
+    if (checkMixed) checkMixed.checked = preferMixed;
+    if (checkRepeats) checkRepeats.checked = avoidRepeats;
+}
+
 let currentAdminSignups = [];
 
 function populateAdminPairingControls(signups) {
@@ -538,6 +570,7 @@ function populateAdminPairingControls(signups) {
     if (adminPanel) adminPanel.classList.remove('hidden');
     if (completeContainer) completeContainer.classList.remove('hidden');
     
+    loadRulePreferences();
     validateAdminGeneration();
 }
 
@@ -672,13 +705,19 @@ async function generateRoundDraft() {
             courtsConfig.push({ courtNumber: val });
         }
 
+        const rules = {
+            balanceLevels: document.getElementById('rule-balance-levels')?.checked !== false,
+            preferMixed: document.getElementById('rule-prefer-mixed')?.checked !== false,
+            avoidRepeats: document.getElementById('rule-avoid-repeats')?.checked !== false
+        };
+
         const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/generate-round`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ courtsConfig })
+            body: JSON.stringify({ courtsConfig, rules })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -693,6 +732,7 @@ async function generateRoundDraft() {
             is_draft: true,
             round_number: data.round_number
         })));
+        validateDraftDuplicates();
     } catch (err) {
         alert(err.message);
     }
@@ -709,11 +749,85 @@ function updateDraftPlayer(matchIndex, playerKey, selectElement) {
         id: newPlayerId,
         name: newPlayerName
     };
+
+    validateDraftDuplicates();
+}
+
+// Check if any player is assigned to multiple matches in the current draft/edit round
+function validateDraftDuplicates() {
+    if (!draftPairings) return true;
+    
+    const selects = document.querySelectorAll('#courts-match-grid select');
+    selects.forEach(sel => {
+        sel.classList.remove('border-red-500', 'text-red-700', 'bg-red-50');
+    });
+
+    const statusText = document.getElementById('admin-pairing-status');
+    if (statusText) {
+        statusText.textContent = '';
+        statusText.classList.add('hidden');
+    }
+
+    const seenIds = new Set();
+    const duplicateIds = new Set();
+    
+    draftPairings.forEach(m => {
+        ['player1', 'player2', 'player3', 'player4'].forEach(key => {
+            const pid = m[key]?.id;
+            if (pid) {
+                if (seenIds.has(pid)) {
+                    duplicateIds.add(pid);
+                }
+                seenIds.add(pid);
+            }
+        });
+    });
+
+    if (duplicateIds.size > 0) {
+        selects.forEach(sel => {
+            const val = parseInt(sel.value, 10);
+            if (duplicateIds.has(val)) {
+                sel.classList.add('border-red-500', 'text-red-700', 'bg-red-50');
+            }
+        });
+        
+        const dupNames = [];
+        duplicateIds.forEach(id => {
+            const player = currentAdminSignups.find(s => s.player_id === id);
+            if (player) dupNames.push(player.name || player.player_name);
+        });
+
+        const errorMsg = `Warning: Duplicate players planned for this round: ${dupNames.join(', ')}. Please resolve before publishing/saving.`;
+        
+        if (statusText) {
+            statusText.textContent = errorMsg;
+            statusText.classList.remove('hidden');
+        }
+
+        const pubBtn = document.getElementById('admin-publish-btn');
+        if (pubBtn) pubBtn.disabled = true;
+        const saveBtn = document.getElementById('admin-save-pairings-btn');
+        if (saveBtn) saveBtn.disabled = true;
+
+        return false;
+    } else {
+        const pubBtn = document.getElementById('admin-publish-btn');
+        if (pubBtn) pubBtn.disabled = false;
+        const saveBtn = document.getElementById('admin-save-pairings-btn');
+        if (saveBtn) saveBtn.disabled = false;
+        
+        return true;
+    }
 }
 
 async function publishActiveRound() {
     if (!activeSession || !draftPairings) return;
     
+    if (!validateDraftDuplicates()) {
+        alert('Please resolve duplicate players before publishing.');
+        return;
+    }
+
     // Get round number
     const maxRoundRes = await fetch(`${API_URL}/api/sessions/current`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -766,6 +880,30 @@ function populateActiveMatches(matches) {
     const grid = document.getElementById('courts-match-grid');
     grid.innerHTML = '';
 
+    // Update admin edit controls visibility
+    const editControls = document.getElementById('admin-match-edit-controls');
+    if (currentUser && currentUser.is_admin && matches && matches.length > 0) {
+        const hasDraft = matches.some(m => m.is_draft);
+        if (hasDraft) {
+            if (editControls) editControls.classList.add('hidden');
+        } else {
+            if (editControls) {
+                editControls.classList.remove('hidden');
+                if (isEditingPublishedRound) {
+                    document.getElementById('admin-edit-pairings-btn').classList.add('hidden');
+                    document.getElementById('admin-save-pairings-btn').classList.remove('hidden');
+                    document.getElementById('admin-cancel-pairings-btn').classList.remove('hidden');
+                } else {
+                    document.getElementById('admin-edit-pairings-btn').classList.remove('hidden');
+                    document.getElementById('admin-save-pairings-btn').classList.add('hidden');
+                    document.getElementById('admin-cancel-pairings-btn').classList.add('hidden');
+                }
+            }
+        }
+    } else {
+        if (editControls) editControls.classList.add('hidden');
+    }
+
     if (!matches || matches.length === 0) {
         grid.innerHTML = `
             <div class="col-span-2 text-center p-8 bg-white border-2 border-on-background">
@@ -778,7 +916,7 @@ function populateActiveMatches(matches) {
     const maxRound = Math.max(...matches.map(m => m.round_number));
     document.getElementById('matches-section-title').textContent = `Active Pairings (Round ${maxRound})`;
 
-    // Helper to generate a dropdown if in draft mode
+    // Helper to generate a dropdown if in draft/edit mode
     function renderPlayer(pName, pObj, mIndex, pKey, isDraft) {
         if (!isDraft) return `<p class="font-body-lg font-bold uppercase">${pName}</p>`;
         
@@ -796,8 +934,18 @@ function populateActiveMatches(matches) {
         `;
     }
 
+    // If we are editing, we display draftPairings instead of the published matches
+    let displayMatches = matches;
+    if (isEditingPublishedRound && draftPairings) {
+        displayMatches = draftPairings.map(p => ({
+            ...p,
+            is_draft: true,
+            round_number: maxRound
+        }));
+    }
+
     // Filter to show matches from the latest active round (or draft)
-    const latestMatches = matches.filter(m => m.round_number === maxRound);
+    const latestMatches = displayMatches.filter(m => m.round_number === maxRound);
 
     latestMatches.forEach((m, mIndex) => {
         const card = document.createElement('div');
@@ -853,6 +1001,71 @@ function populateActiveMatches(matches) {
     });
 }
 
+// Post-publish pairings edit mode functions
+function startEditingPairings() {
+    if (!activeSession || !activeSession.matches || activeSession.matches.length === 0) return;
+    
+    const maxRound = Math.max(...activeSession.matches.map(m => m.round_number));
+    const latestMatches = activeSession.matches.filter(m => m.round_number === maxRound);
+    
+    // Check if any of these matches have scores
+    const hasScores = latestMatches.some(m => m.team_a_score !== null || m.team_b_score !== null);
+    if (hasScores) {
+        if (!confirm('Warning: Matches in this round already have scores recorded. Modifying pairings will reset these scores. Do you want to continue?')) {
+            return;
+        }
+    }
+    
+    draftPairings = latestMatches.map(m => ({
+        court: m.court,
+        player1: { id: m.player1, name: m.p1_name },
+        player2: { id: m.player2, name: m.p2_name },
+        player3: { id: m.player3, name: m.p3_name },
+        player4: { id: m.player4, name: m.p4_name }
+    }));
+    
+    isEditingPublishedRound = true;
+    
+    populateActiveMatches(activeSession.matches);
+    validateDraftDuplicates();
+}
+
+function cancelEditingPairings() {
+    isEditingPublishedRound = false;
+    draftPairings = null;
+    loadDashboardData();
+}
+
+async function saveEditedPairings() {
+    if (!activeSession || !draftPairings) return;
+    if (!validateDraftDuplicates()) {
+        alert('Please resolve duplicate players before saving.');
+        return;
+    }
+    
+    const maxRound = Math.max(...activeSession.matches.map(m => m.round_number));
+    
+    try {
+        const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/publish-round`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ round_number: maxRound, pairings: draftPairings })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        alert(`Round ${maxRound} pairings updated successfully!`);
+        isEditingPublishedRound = false;
+        draftPairings = null;
+        loadDashboardData();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
 async function saveMatchScore(matchId) {
     const scoreA = parseInt(document.getElementById(`score-a-${matchId}`).value);
     const scoreB = parseInt(document.getElementById(`score-b-${matchId}`).value);
@@ -879,7 +1092,10 @@ async function saveMatchScore(matchId) {
 // Load Leaderboard list
 async function loadLeaderboardData() {
     try {
-        const res = await fetch(`${API_URL}/api/leaderboard`, {
+        const scopeSelect = document.getElementById('leaderboard-scope-select');
+        const scope = scopeSelect ? scopeSelect.value : 'overall';
+
+        const res = await fetch(`${API_URL}/api/leaderboard?type=${scope}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
@@ -1055,6 +1271,24 @@ function urlB64ToUint8Array(base64String) {
 window.addEventListener('DOMContentLoaded', () => {
     updateAuthVisibility();
     navigate('home');
+
+    // Auto-hide header on scroll down
+    let lastScrollY = window.scrollY;
+    const header = document.querySelector('header');
+    window.addEventListener('scroll', () => {
+        if (!header) return;
+        const currentScrollY = window.scrollY;
+        
+        if (currentScrollY > lastScrollY && currentScrollY > 80) {
+            // Scrolling down - hide header
+            header.style.transform = 'translateY(-100%)';
+        } else {
+            // Scrolling up - show header
+            header.style.transform = 'translateY(0)';
+        }
+        
+        lastScrollY = currentScrollY;
+    });
 
     // Register Service Worker
     if ('serviceWorker' in navigator) {

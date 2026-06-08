@@ -243,7 +243,7 @@
                 <!-- Image/Map Card -->
                 <div class="md:col-span-4 space-y-gutter">
                     <div class="bg-surface-container brutalist-border-heavy h-64 relative overflow-hidden heavy-brutalist-shadow">
-                        <img class="w-full h-full object-cover grayscale-[20%] sepia-[10%] contrast-125" src="/images/tennis_facility_main.png">
+                        <img class="w-full h-full object-cover grayscale-[20%] sepia-[10%] contrast-125" src="/images/screen_amsterdamse_bos.png">
                         <div class="absolute inset-0 bg-primary/20 mix-blend-multiply"></div>
                     </div>
                     <div class="bg-primary-container brutalist-border-heavy p-gutter heavy-brutalist-shadow">
@@ -510,22 +510,22 @@
                 <section class="border-heavy-border border-on-background bg-surface-container-lowest brutalist-shadow-lg overflow-hidden admin-only hidden">
                     <div class="p-6 border-b-2 border-on-background flex flex-col md:flex-row justify-between items-start md:items-center bg-white gap-4">
                         <h3 class="font-headline-md text-headline-md uppercase">Checked-In Players</h3>
-                        <div class="flex flex-wrap gap-2">
-                            <button class="bg-primary-container border-2 border-on-background text-on-primary-container px-3 py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-primary transition-all text-xs" onclick="manuallyAddPlayerPrompt()">Add Player</button>
-                            <button class="bg-surface border-2 border-on-background text-on-surface px-3 py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-surface-variant transition-all text-xs" onclick="fillRoster16()">Fill 16</button>
-                            <button class="bg-secondary border-2 border-on-background text-white px-3 py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-secondary-container transition-all text-xs" onclick="createNewSession()">New Session</button>
+                        <div class="flex flex-wrap gap-2 w-full sm:w-auto">
+                            <button class="flex-1 sm:flex-initial bg-primary-container border-2 border-on-background text-on-primary-container px-4 py-3 md:px-3 md:py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-primary transition-all text-sm md:text-xs text-center" onclick="manuallyAddPlayerPrompt()">Add Player</button>
+                            <button class="flex-1 sm:flex-initial bg-surface border-2 border-on-background text-on-surface px-4 py-3 md:px-3 md:py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-surface-variant transition-all text-sm md:text-xs text-center" onclick="fillRoster16()">Fill 16</button>
+                            <button class="flex-1 sm:flex-initial bg-secondary border-2 border-on-background text-white px-4 py-3 md:px-3 md:py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-secondary-container transition-all text-sm md:text-xs text-center" onclick="createNewSession()">New Session</button>
                         </div>
                     </div>
 
                     <!-- Roster counters -->
-                    <div class="p-6 border-b-2 border-on-background bg-surface-container flex flex-col sm:flex-row gap-4" id="dashboard-counters">
-                        <div class="bg-primary-container brutalist-border-heavy flex flex-col justify-center p-4 relative overflow-hidden brutalist-shadow flex-1 h-24">
-                            <p class="font-label-bold text-label-sm uppercase relative z-10 text-on-primary-container">Active Session</p>
-                            <p class="font-headline-md text-base md:text-lg relative z-10" id="session-date-banner">None</p>
+                    <div class="p-6 border-b-2 border-on-background bg-surface-container flex flex-row gap-4" id="dashboard-counters">
+                        <div class="bg-primary-container brutalist-border-heavy flex flex-col justify-center p-3 relative overflow-hidden brutalist-shadow flex-1 h-16 sm:h-24">
+                            <p class="font-label-bold text-[10px] sm:text-label-sm uppercase relative z-10 text-on-primary-container">Active Session</p>
+                            <p class="font-headline-md text-xs sm:text-base md:text-lg relative z-10" id="session-date-banner">None</p>
                         </div>
-                        <div class="bg-secondary-container brutalist-border-heavy flex flex-col justify-center p-4 relative overflow-hidden brutalist-shadow flex-1 h-24">
-                            <p class="font-label-bold text-label-sm uppercase text-on-secondary-container relative z-10">Checked In</p>
-                            <p class="font-display-xl text-xl md:text-2xl text-on-secondary-container relative z-10" id="session-checkins-banner">0</p>
+                        <div class="bg-secondary-container brutalist-border-heavy flex flex-col justify-center p-3 relative overflow-hidden brutalist-shadow flex-1 h-16 sm:h-24">
+                            <p class="font-label-bold text-[10px] sm:text-label-sm uppercase text-on-secondary-container relative z-10">Checked In</p>
+                            <p class="font-display-xl text-base sm:text-xl md:text-2xl text-on-secondary-container relative z-10" id="session-checkins-banner">0</p>
                         </div>
                     </div>
 
@@ -552,6 +552,27 @@
                                 <option value="4" selected>4 Courts (16 Players)</option>
                             </select>
                         </div>
+                        
+                        <!-- Pairing Rules Toggles -->
+                        <div class="border-2 border-dashed border-outline-variant p-4 bg-white space-y-3">
+                            <h4 class="font-label-bold text-label-sm uppercase text-secondary">Pairing Rules Toggles</h4>
+                            
+                            <label class="flex items-center gap-2 cursor-pointer font-body-md">
+                                <input type="checkbox" id="rule-balance-levels" checked class="w-5 h-5 accent-primary border-2 border-on-background focus:ring-4 focus:ring-primary-container outline-none transition-all" onchange="saveRulePreferences()">
+                                <span>Balance Team Levels</span>
+                            </label>
+                            
+                            <label class="flex items-center gap-2 cursor-pointer font-body-md">
+                                <input type="checkbox" id="rule-prefer-mixed" checked class="w-5 h-5 accent-primary border-2 border-on-background focus:ring-4 focus:ring-primary-container outline-none transition-all" onchange="saveRulePreferences()">
+                                <span>Prefer Mixed Doubles (2M/2F split)</span>
+                            </label>
+                            
+                            <label class="flex items-center gap-2 cursor-pointer font-body-md">
+                                <input type="checkbox" id="rule-avoid-repeats" checked class="w-5 h-5 accent-primary border-2 border-on-background focus:ring-4 focus:ring-primary-container outline-none transition-all" onchange="saveRulePreferences()">
+                                <span>Avoid Repeat Partners / Opponents</span>
+                            </label>
+                        </div>
+
                         <div id="court-labels-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <!-- Dynamically populated via JS -->
                         </div>
@@ -569,8 +590,19 @@
 
                 <!-- Active Matches (Courts) -->
                 <section class="border-heavy-border border-on-background bg-surface-container-lowest brutalist-shadow-lg overflow-hidden" id="active-matches-section">
-                    <div class="p-6 border-b-2 border-on-background bg-white">
+                    <div class="p-6 border-b-2 border-on-background bg-white flex justify-between items-center flex-wrap gap-4">
                         <h3 class="font-headline-md text-headline-md uppercase" id="matches-section-title">Active Pairings</h3>
+                        <div id="admin-match-edit-controls" class="admin-only hidden flex gap-2">
+                            <button id="admin-edit-pairings-btn" class="bg-primary-container border-2 border-on-background px-4 py-2 font-label-bold text-label-sm uppercase brutalist-shadow brutalist-button-press" onclick="startEditingPairings()">
+                                Edit Pairings
+                            </button>
+                            <button id="admin-save-pairings-btn" class="bg-secondary border-2 border-on-background text-white px-4 py-2 font-label-bold text-label-sm uppercase brutalist-shadow brutalist-button-press hidden" onclick="saveEditedPairings()">
+                                Save Pairings
+                            </button>
+                            <button id="admin-cancel-pairings-btn" class="bg-red-700 text-white border-2 border-on-background px-4 py-2 font-label-bold text-label-sm uppercase brutalist-shadow brutalist-button-press hidden" onclick="cancelEditingPairings()">
+                                Cancel
+                            </button>
+                        </div>
                     </div>
                     <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6" id="courts-match-grid">
                         <!-- Dynamic list of 4 court matches -->
@@ -588,8 +620,15 @@
             <!-- Rankings/Leaderboard View -->
             <div id="dashboard-tab-rankings" class="space-y-8 hidden">
                 <section class="border-heavy-border border-on-background bg-surface-container-lowest brutalist-shadow-lg overflow-hidden">
-                    <div class="p-6 border-b-2 border-on-background bg-white">
+                    <div class="p-6 border-b-2 border-on-background bg-white flex justify-between items-center flex-wrap gap-4">
                         <h3 class="font-headline-md text-headline-md uppercase">Leaderboard</h3>
+                        <div class="flex items-center gap-2">
+                            <label class="font-label-bold text-label-sm uppercase text-outline">Scope:</label>
+                            <select id="leaderboard-scope-select" class="bg-white border-2 border-on-background p-2 font-body-md focus:ring-4 focus:ring-primary-container outline-none transition-all" onchange="loadLeaderboardData()">
+                                <option value="overall" selected>Overall (All Time)</option>
+                                <option value="today">Today's Session</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse">
@@ -621,12 +660,13 @@
                 </div>
                 <div class="flex flex-col gap-2 text-right">
                     <p class="font-label-bold text-label-bold uppercase">Confirm via Tikkie → Register on App</p>
-                    <div class="flex gap-4 justify-end">
-                        <a href="https://www.instagram.com/tennisandtapas/" target="_blank" rel="noopener noreferrer" class="text-white hover:text-primary-fixed transition-colors flex items-center justify-center" style="height: 36px; width: 36px;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                    <div class="flex gap-4 justify-end items-center">
+                        <a href="https://www.instagram.com/tennisandtapas/" target="_blank" rel="noopener noreferrer" class="text-white hover:text-primary-fixed transition-colors flex items-center justify-center" title="Instagram">
+                            <span class="material-symbols-outlined text-4xl">sports_tennis</span>
                         </a>
-                        <span class="material-symbols-outlined text-4xl cursor-pointer hover:text-primary-fixed transition-colors">sports_tennis</span>
-                        <span class="material-symbols-outlined text-4xl cursor-pointer hover:text-primary-fixed transition-colors">map</span>
+                        <a href="https://maps.google.com/?q=Tennisvereniging+Amsterdamse+Bos+Bosbaan+5+1182+AG+Amstelveen" target="_blank" rel="noopener noreferrer" class="text-white hover:text-primary-fixed transition-colors flex items-center justify-center" title="Location Map">
+                            <span class="material-symbols-outlined text-4xl">map</span>
+                        </a>
                     </div>
                 </div>
             </div>
@@ -651,8 +691,8 @@
             <span class="font-label-bold text-label-bold uppercase text-[10px]">SIGN IN</span>
         </button>
         <button id="nav-btn-dashboard" class="flex flex-col items-center justify-center text-on-surface p-2 transition-all active:scale-95 auth-required hidden" onclick="navigate('dashboard')">
-            <span class="material-symbols-outlined">person</span>
-            <span class="font-label-bold text-label-bold uppercase text-[10px]">PROFILE</span>
+            <span id="nav-btn-dashboard-icon" class="material-symbols-outlined">person</span>
+            <span id="nav-btn-dashboard-label" class="font-label-bold text-label-bold uppercase text-[10px]">PROFILE</span>
         </button>
         <button id="nav-btn-alerts" class="flex flex-col items-center justify-center text-on-surface p-2 transition-all active:scale-95 auth-required hidden" onclick="navigate('alerts')">
             <span class="material-symbols-outlined">notifications</span>

@@ -204,8 +204,14 @@ async function sendPushNotification(playerIds, payload) {
  * respecting level differences, avoiding partner repeats,
  * encouraging mixed doubles, and maximizing opponent rotation.
  */
-export async function generatePairings(sessionId, roundNumber, approvedPlayers, courtsConfig) {
-  const numCourts = courtsConfig.length;
+export async function generatePairings(sessionId, roundNumber, approvedPlayers, courtsConfig, rules = {}) {
+  const finalCourtsConfig = courtsConfig || [
+    { courtNumber: "1" },
+    { courtNumber: "2" },
+    { courtNumber: "3" },
+    { courtNumber: "4" }
+  ];
+  const numCourts = finalCourtsConfig.length;
   const requiredPlayers = numCourts * 4;
 
   if (approvedPlayers.length < requiredPlayers) {
@@ -283,14 +289,19 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
     recordOpponent(m.player2, m.player4, 10);
   }
 
+  // Extract custom rules options (default to true if not specified)
+  const balanceLevels = rules.balanceLevels !== false;
+  const preferMixed = rules.preferMixed !== false;
+  const avoidRepeats = rules.avoidRepeats !== false;
+
   // Scoring parameters
-  const PARTNER_REPEATED_PENALTY = 100000; // Massively penalize re-partnering
-  const OPPONENT_REPEATED_PENALTY = 1000;
-  const LEVEL_GAP_PENALTY = 100; // Penalty per level difference in match balance
+  const PARTNER_REPEATED_PENALTY = avoidRepeats ? 100000 : 0; // Massively penalize re-partnering
+  const OPPONENT_REPEATED_PENALTY = avoidRepeats ? 1000 : 0;
+  const LEVEL_GAP_PENALTY = balanceLevels ? 100 : 0; // Penalty per level difference in match balance
   const PARTNER_GAP_IDEAL = 4; // Preferred partner level gap <= 4
-  const PARTNER_GAP_SOFT_PENALTY = 1000; // Penalty for partner gap > 4
+  const PARTNER_GAP_SOFT_PENALTY = balanceLevels ? 1000 : 0; // Penalty for partner gap > 4
   const PARTNER_GAP_HARD_LIMIT = 8; // Max partner gap
-  const PARTNER_GAP_HARD_PENALTY = 500000; // Penalty for partner gap > 8
+  const PARTNER_GAP_HARD_PENALTY = balanceLevels ? 500000 : 0; // Penalty for partner gap > 8
 
   // We will run a randomized search with hill-climbing to find the best configuration
   let bestPairing = null;
@@ -359,26 +370,28 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
       }
 
       // Gender Match Weighting (Prefer Mixed Doubles 2M/2F split)
-      const courtGenders = [p1.gender, p2.gender, p3.gender, p4.gender];
-      const mCount = courtGenders.filter(g => g === 'M').length;
-      const fCount = courtGenders.filter(g => g === 'F').length;
+      if (preferMixed) {
+        const courtGenders = [p1.gender, p2.gender, p3.gender, p4.gender];
+        const mCount = courtGenders.filter(g => g === 'M').length;
+        const fCount = courtGenders.filter(g => g === 'F').length;
 
-      if (mCount === 2 && fCount === 2) {
-        // Ideal case 1: Mixed doubles (1M 1F on both teams)
-        if (p1.gender !== p2.gender && p3.gender !== p4.gender) {
-          score += 0; // Perfect mixed doubles
+        if (mCount === 2 && fCount === 2) {
+          // Ideal case 1: Mixed doubles (1M 1F on both teams)
+          if (p1.gender !== p2.gender && p3.gender !== p4.gender) {
+            score += 0; // Perfect mixed doubles
+          } else {
+            score += 150; // Same-gender teams playing each other (e.g. 2M vs 2F)
+          }
+        } else if (mCount === 4 || fCount === 4) {
+          score += 80; // All men or all women on court (very clean)
         } else {
-          score += 150; // Same-gender teams playing each other (e.g. 2M vs 2F)
+          // 3M 1F or 3F 1M (isolates one player)
+          score += 50000; // Heavily discouraged
         }
-      } else if (mCount === 4 || fCount === 4) {
-        score += 80; // All men or all women on court (very clean)
-      } else {
-        // 3M 1F or 3F 1M (isolates one player)
-        score += 50000; // Heavily discouraged
       }
 
       currentMatches.push({
-        court: courtsConfig[c].courtNumber,
+        court: finalCourtsConfig[c].courtNumber,
         player1: p1,
         player2: p2,
         player3: p3,
@@ -924,7 +937,7 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
 // Generate next draft round (Admin only)
 app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, async (req, res) => {
   const sessionId = req.params.id;
-  const { courtsConfig } = req.body;
+  const { courtsConfig, rules } = req.body;
 
   if (!courtsConfig || !Array.isArray(courtsConfig) || courtsConfig.length < 1 || courtsConfig.length > 4) {
     return res.status(400).json({ error: 'Valid courts configuration required (1 to 4 courts)' });
@@ -951,7 +964,7 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
     const nextRoundNumber = (lastMatch?.max_round || 0) + 1;
 
     // Generate optimal pairings
-    const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers, courtsConfig);
+    const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers, courtsConfig, rules);
 
     res.json({ round_number: nextRoundNumber, pairings });
   } catch (err) {
@@ -973,12 +986,20 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
     const approvedPlayers = await db.all(`SELECT player_id FROM signups WHERE session_id = ? AND status = 'approved'`, [sessionId]);
     const validPlayerIds = new Set(approvedPlayers.map(p => p.player_id));
 
+    const allParticipantIds = [];
     for (const match of pairings) {
       for (const p of [match.player1, match.player2, match.player3, match.player4]) {
         if (!validPlayerIds.has(p.id)) {
           return res.status(400).json({ error: `Player ID ${p.id} (${p.name || ''}) is not approved for this session.` });
         }
+        allParticipantIds.push(p.id);
       }
+    }
+
+    // Check for duplicates
+    const uniqueParticipantIds = new Set(allParticipantIds);
+    if (uniqueParticipantIds.size !== allParticipantIds.length) {
+      return res.status(400).json({ error: 'Duplicate players detected. The same player cannot be assigned to more than one match in the same round.' });
     }
 
     // Start database transaction
@@ -991,7 +1012,6 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
     await db.run('DELETE FROM matches WHERE session_id = ? AND round_number = ?', [sessionId, round_number]);
 
     // Insert new matches
-    const allParticipantIds = [];
     for (const match of pairings) {
       await db.run(`
         INSERT INTO matches (session_id, round_number, court, player1, player2, player3, player4)
@@ -1005,13 +1025,12 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
         match.player3.id,
         match.player4.id
       ]);
-      allParticipantIds.push(match.player1.id, match.player2.id, match.player3.id, match.player4.id);
     }
 
     await db.run('COMMIT');
 
     // Trigger Web Push Notifications in background
-    // We send to all 16 players telling them their court and partners
+    // We send to all players telling them their court and partners
     for (const match of pairings) {
       const matchPlayers = [match.player1, match.player2, match.player3, match.player4];
       const payload = {
@@ -1021,6 +1040,17 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
       };
       // Send custom push notification per court to make it personal
       await sendPushNotification(matchPlayers.map(p => p.id), payload);
+    }
+
+    // Send notifications to resting players
+    const restingPlayerIds = approvedPlayers.map(p => p.player_id).filter(id => !uniqueParticipantIds.has(id));
+    if (restingPlayerIds.length > 0) {
+      const restingPayload = {
+        title: `Round ${round_number} Status`,
+        body: "You're not playing this round, enjoy some social time!",
+        url: '/'
+      };
+      await sendPushNotification(restingPlayerIds, restingPayload);
     }
 
     res.json({ message: `Round ${round_number} published successfully and notifications sent` });
@@ -1055,15 +1085,30 @@ app.put('/api/matches/:id/score', authenticateToken, requireAdmin, async (req, r
 // Get Leaderboard (History-based)
 app.get('/api/leaderboard', authenticateToken, async (req, res) => {
   try {
+    const { type } = req.query; // 'today' or 'overall'
+
     // Fetch all players
     const players = await db.all('SELECT id, name, gender, level, picture_path FROM players WHERE is_admin = 0');
     
-    // Fetch all completed matches with scores
-    const matches = await db.all(`
+    let matchesQuery = `
       SELECT player1, player2, player3, player4, team_a_score, team_b_score
       FROM matches 
       WHERE team_a_score IS NOT NULL AND team_b_score IS NOT NULL
-    `);
+    `;
+    const queryParams = [];
+
+    if (type === 'today') {
+      const currentSession = await db.get("SELECT id FROM sessions ORDER BY id DESC LIMIT 1");
+      if (currentSession) {
+        matchesQuery += ` AND session_id = ?`;
+        queryParams.push(currentSession.id);
+      } else {
+        return res.json({ leaderboard: [] });
+      }
+    }
+
+    // Fetch completed matches with scores
+    const matches = await db.all(matchesQuery, queryParams);
 
     // Calculate statistics
     const statsMap = new Map();
@@ -1107,7 +1152,7 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
       }
     }
 
-    const leaderboard = Array.from(statsMap.values()).map(p => {
+    let leaderboard = Array.from(statsMap.values()).map(p => {
       const diff = p.pointsWon - p.pointsLost;
       const winRate = p.played > 0 ? Math.round((p.wins / p.played) * 100) : 0;
       return {
@@ -1116,6 +1161,10 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
         winRate
       };
     });
+
+    if (type === 'today') {
+      leaderboard = leaderboard.filter(p => p.played > 0);
+    }
 
     // Sort by wins desc, diff desc, pointsWon desc
     leaderboard.sort((a, b) => {
