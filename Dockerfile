@@ -12,7 +12,7 @@ RUN npm ci --only=production
 
 # Copy server code and public assets
 COPY server.js ./
-# We will copy public assets if/when the UI is added
+COPY public ./public
 
 # Expose the API port
 EXPOSE 3000
