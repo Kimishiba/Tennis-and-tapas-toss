@@ -424,6 +424,7 @@ app.post('/api/auth/register', upload.single('picture'), async (req, res) => {
     return res.status(400).json({ error: 'Level must be between 1 and 9' });
   }
 
+  const normalizedUsername = username.toLowerCase().trim();
   const picture_path = req.file ? `/uploads/${req.file.filename}` : null;
 
   try {
@@ -432,7 +433,7 @@ app.post('/api/auth/register', upload.single('picture'), async (req, res) => {
 
     const result = await db.run(
       'INSERT INTO players (name, gender, level, username, password_hash, picture_path) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, gender, parsedLevel, username, password_hash, picture_path]
+      [name, gender, parsedLevel, normalizedUsername, password_hash, picture_path]
     );
 
     const token = jwt.sign({ id: result.lastID }, JWT_SECRET, { expiresIn: '30d' });
@@ -441,7 +442,7 @@ app.post('/api/auth/register', upload.single('picture'), async (req, res) => {
       user: {
         id: result.lastID,
         name,
-        username,
+        username: normalizedUsername,
         gender,
         level: parsedLevel,
         picture_path,
@@ -463,8 +464,10 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
+  const normalizedUsername = username.toLowerCase().trim();
+
   try {
-    const user = await db.get('SELECT * FROM players WHERE username = ?', [username]);
+    const user = await db.get('SELECT * FROM players WHERE username = ?', [normalizedUsername]);
     if (!user) {
       return res.status(400).json({ error: 'Invalid username or password' });
     }
@@ -610,9 +613,11 @@ app.put('/api/profile', authenticateToken, upload.single('picture'), async (req,
     return res.status(400).json({ error: 'Level must be between 1 and 9' });
   }
 
+  const normalizedUsername = username.toLowerCase().trim();
+
   try {
     // Check if the username is already taken by another player
-    const existing = await db.get('SELECT id FROM players WHERE username = ? AND id != ?', [username, req.user.id]);
+    const existing = await db.get('SELECT id FROM players WHERE username = ? AND id != ?', [normalizedUsername, req.user.id]);
     if (existing) {
       return res.status(400).json({ error: 'Email (username) is already in use by another account' });
     }
@@ -634,12 +639,12 @@ app.put('/api/profile', authenticateToken, upload.single('picture'), async (req,
 
       await db.run(
         'UPDATE players SET name = ?, gender = ?, level = ?, username = ?, picture_path = ? WHERE id = ?',
-        [name, gender, parsedLevel, username, picture_path, req.user.id]
+        [name, gender, parsedLevel, normalizedUsername, picture_path, req.user.id]
       );
     } else {
       await db.run(
         'UPDATE players SET name = ?, gender = ?, level = ?, username = ? WHERE id = ?',
-        [name, gender, parsedLevel, username, req.user.id]
+        [name, gender, parsedLevel, normalizedUsername, req.user.id]
       );
     }
     res.json({ message: 'Profile updated successfully' });
