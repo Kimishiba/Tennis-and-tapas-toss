@@ -533,14 +533,30 @@
                         <!-- Populated dynamically with player signups and checkboxes for approvals -->
                     </div>
                     <div class="p-4 bg-surface-container border-t-2 border-on-background text-center font-label-bold text-label-bold uppercase">
-                        Manage approvals to select exactly 16 players.
+                        Manage approvals to select players for the toss.
                     </div>
                 </section>
 
                 <!-- Admin Pairing Generator Controls -->
                 <section class="border-heavy-border border-on-background bg-surface-container p-6 brutalist-shadow admin-only hidden" id="admin-pairing-panel">
-                    <h3 class="font-headline-md text-headline-md uppercase mb-2">Round Generator</h3>
+                    <h3 class="font-headline-md text-headline-md uppercase mb-4">Round Generator</h3>
                     <p id="admin-pairing-status" class="font-label-bold text-label-sm uppercase mb-4 text-red-700"></p>
+                    
+                    <div class="mb-6 space-y-4">
+                        <div class="flex flex-col gap-2">
+                            <label class="font-label-bold text-label-sm uppercase text-outline">Number of Courts Available</label>
+                            <select id="num-courts-select" class="bg-white border-2 border-on-background p-3 font-body-md focus:ring-4 focus:ring-primary-container outline-none transition-all" onchange="updateCourtInputs()">
+                                <option value="1">1 Court (4 Players)</option>
+                                <option value="2">2 Courts (8 Players)</option>
+                                <option value="3">3 Courts (12 Players)</option>
+                                <option value="4" selected>4 Courts (16 Players)</option>
+                            </select>
+                        </div>
+                        <div id="court-labels-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Dynamically populated via JS -->
+                        </div>
+                    </div>
+
                     <div class="flex flex-col md:flex-row gap-4">
                         <button id="admin-generate-btn" class="flex-1 bg-primary-container border-2 border-on-background p-4 font-label-bold text-label-bold uppercase brutalist-shadow brutalist-button-press disabled:opacity-50 disabled:pointer-events-none" onclick="generateRoundDraft()">
                             Generate Next Draft Round

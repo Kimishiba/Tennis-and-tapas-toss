@@ -528,26 +528,38 @@ async function togglePlayerApproval(playerId, status) {
     }
 }
 
+let currentAdminSignups = [];
+
 function populateAdminPairingControls(signups) {
-    const approvedCount = signups ? signups.filter(s => s.status === 'approved').length : 0;
+    currentAdminSignups = signups || [];
     const adminPanel = document.getElementById('admin-pairing-panel');
     const completeContainer = document.getElementById('admin-complete-session-container');
-    const generateBtn = document.getElementById('admin-generate-btn');
-    const statusEl = document.getElementById('admin-pairing-status');
 
     if (adminPanel) adminPanel.classList.remove('hidden');
     if (completeContainer) completeContainer.classList.remove('hidden');
+    
+    validateAdminGeneration();
+}
 
-    if (approvedCount === 16) {
+function validateAdminGeneration() {
+    const approvedCount = currentAdminSignups.filter(s => s.status === 'approved').length;
+    const numCourtsSelect = document.getElementById('num-courts-select');
+    const numCourts = numCourtsSelect ? parseInt(numCourtsSelect.value, 10) : 4;
+    const requiredPlayers = numCourts * 4;
+
+    const generateBtn = document.getElementById('admin-generate-btn');
+    const statusEl = document.getElementById('admin-pairing-status');
+
+    if (approvedCount >= requiredPlayers) {
         if (generateBtn) generateBtn.disabled = false;
         if (statusEl) {
-            statusEl.textContent = "Roster is complete! Ready to generate pairings.";
+            statusEl.textContent = `Roster has ${approvedCount} approved players. Ready to generate pairings for ${numCourts} courts!`;
             statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-green-700";
         }
     } else {
         if (generateBtn) generateBtn.disabled = true;
         if (statusEl) {
-            statusEl.textContent = `Pairings require exactly 16 approved players (currently ${approvedCount} approved).`;
+            statusEl.textContent = `Need at least ${requiredPlayers} approved players for ${numCourts} courts (currently ${approvedCount} approved).`;
             statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-red-700";
         }
     }
@@ -633,13 +645,40 @@ async function createNewSession() {
     }
 }
 
+// Dynamically generate court label inputs based on the selected number of courts
+function updateCourtInputs() {
+    const numCourts = parseInt(document.getElementById('num-courts-select').value, 10);
+    const container = document.getElementById('court-labels-container');
+    container.innerHTML = '';
+    for (let i = 1; i <= numCourts; i++) {
+        container.innerHTML += `
+            <div class="flex flex-col gap-2">
+                <label class="font-label-bold text-label-sm uppercase text-outline">Court ${i} Label</label>
+                <input type="text" id="court-label-${i}" value="${i}" class="bg-white border-2 border-on-background p-3 font-body-md focus:ring-4 focus:ring-primary-container outline-none transition-all">
+            </div>
+        `;
+    }
+    validateAdminGeneration();
+}
+
 // Generate round draft matches (hill-climbing logic client-side preview)
 async function generateRoundDraft() {
     if (!activeSession) return;
     try {
+        const numCourts = parseInt(document.getElementById('num-courts-select').value, 10);
+        const courtsConfig = [];
+        for (let i = 1; i <= numCourts; i++) {
+            const val = document.getElementById(`court-label-${i}`)?.value || `${i}`;
+            courtsConfig.push({ courtNumber: val });
+        }
+
         const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/generate-round`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ courtsConfig })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -657,6 +696,19 @@ async function generateRoundDraft() {
     } catch (err) {
         alert(err.message);
     }
+}
+
+// Update the global draftPairings state when an admin manually changes a player in the dropdown
+function updateDraftPlayer(matchIndex, playerKey, selectElement) {
+    if (!draftPairings || !draftPairings[matchIndex]) return;
+    const newPlayerId = parseInt(selectElement.value, 10);
+    const newPlayerName = selectElement.options[selectElement.selectedIndex].text;
+    
+    // Update the specific player object in the draft
+    draftPairings[matchIndex][playerKey] = {
+        id: newPlayerId,
+        name: newPlayerName
+    };
 }
 
 async function publishActiveRound() {
@@ -726,10 +778,28 @@ function populateActiveMatches(matches) {
     const maxRound = Math.max(...matches.map(m => m.round_number));
     document.getElementById('matches-section-title').textContent = `Active Pairings (Round ${maxRound})`;
 
+    // Helper to generate a dropdown if in draft mode
+    function renderPlayer(pName, pObj, mIndex, pKey, isDraft) {
+        if (!isDraft) return `<p class="font-body-lg font-bold uppercase">${pName}</p>`;
+        
+        const approvedPlayers = currentAdminSignups.filter(s => s.status === 'approved');
+        let options = approvedPlayers.map(p => {
+            const isSelected = p.player_id === pObj.id ? 'selected' : '';
+            return `<option value="${p.player_id}" ${isSelected}>${p.player_name || p.name}</option>`;
+        }).join('');
+        
+        return `
+            <select class="bg-white border-2 border-on-background p-1 font-body-md uppercase max-w-[140px]"
+                    onchange="updateDraftPlayer(${mIndex}, '${pKey}', this)">
+                ${options}
+            </select>
+        `;
+    }
+
     // Filter to show matches from the latest active round (or draft)
     const latestMatches = matches.filter(m => m.round_number === maxRound);
 
-    latestMatches.forEach(m => {
+    latestMatches.forEach((m, mIndex) => {
         const card = document.createElement('div');
         card.className = "border-2 border-on-background p-6 brutalist-shadow bg-white flex flex-col gap-4 relative";
 
@@ -750,13 +820,13 @@ function populateActiveMatches(matches) {
             
             <div class="flex justify-between items-center">
                 <div class="space-y-1">
-                    <p class="font-body-lg font-bold uppercase">${p1_name}</p>
-                    <p class="font-body-lg font-bold uppercase">${p2_name}</p>
+                    ${renderPlayer(p1_name, m.player1, mIndex, 'player1', isDraft)}
+                    ${renderPlayer(p2_name, m.player2, mIndex, 'player2', isDraft)}
                 </div>
                 <div class="text-center font-display-xl text-3xl px-4 text-outline">VS</div>
-                <div class="space-y-1 text-right">
-                    <p class="font-body-lg font-bold uppercase">${p3_name}</p>
-                    <p class="font-body-lg font-bold uppercase">${p4_name}</p>
+                <div class="space-y-1 text-right flex flex-col items-end">
+                    ${renderPlayer(p3_name, m.player3, mIndex, 'player3', isDraft)}
+                    ${renderPlayer(p4_name, m.player4, mIndex, 'player4', isDraft)}
                 </div>
             </div>
 

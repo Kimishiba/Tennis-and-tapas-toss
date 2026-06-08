@@ -204,9 +204,12 @@ async function sendPushNotification(playerIds, payload) {
  * respecting level differences, avoiding partner repeats,
  * encouraging mixed doubles, and maximizing opponent rotation.
  */
-export async function generatePairings(sessionId, roundNumber, approvedPlayers) {
-  if (approvedPlayers.length !== 16) {
-    throw new Error('Pairings require exactly 16 approved players');
+export async function generatePairings(sessionId, roundNumber, approvedPlayers, courtsConfig) {
+  const numCourts = courtsConfig.length;
+  const requiredPlayers = numCourts * 4;
+
+  if (approvedPlayers.length < requiredPlayers) {
+    throw new Error(`Pairings require at least ${requiredPlayers} approved players for ${numCourts} courts`);
   }
 
   // Load all historical matches to compute partner & opponent frequencies
@@ -236,6 +239,27 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
     const key = p1 < p2 ? `${p1},${p2}` : `${p2},${p1}`;
     opponentHistory.set(key, (opponentHistory.get(key) || 0) + weight);
   }
+
+  // Track how many matches each player has played TODAY
+  const todayMatchCount = new Map();
+  approvedPlayers.forEach(p => todayMatchCount.set(p.id, 0));
+  for (const m of currentSessionMatches) {
+    [m.player1, m.player2, m.player3, m.player4].forEach(pId => {
+      if (todayMatchCount.has(pId)) {
+        todayMatchCount.set(pId, todayMatchCount.get(pId) + 1);
+      }
+    });
+  }
+
+  // Sort approved players by fewest matches played today, then randomize slightly to break ties
+  const sortedPlayers = [...approvedPlayers].sort((a, b) => {
+    const countDiff = todayMatchCount.get(a.id) - todayMatchCount.get(b.id);
+    if (countDiff !== 0) return countDiff;
+    return Math.random() - 0.5;
+  });
+
+  // Pick the top `requiredPlayers` to play this round
+  const activePlayers = sortedPlayers.slice(0, requiredPlayers);
 
   // Record historical matches (weighted slightly lower or equal)
   for (const m of allMatches) {
@@ -272,10 +296,9 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
   let bestPairing = null;
   let bestScore = Infinity;
 
-  const players = [...approvedPlayers];
+  const players = [...activePlayers];
 
   // We sample 100,000 permutations to find the optimal pairings.
-  // With 16 players, random sampling works extremely well and finishes in 10-15ms.
   for (let i = 0; i < 100000; i++) {
     // Shuffle players
     for (let j = players.length - 1; j > 0; j--) {
@@ -291,7 +314,7 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
     let score = 0;
     const currentMatches = [];
 
-    for (let c = 0; c < 4; c++) {
+    for (let c = 0; c < numCourts; c++) {
       const offset = c * 4;
       const p1 = players[offset];
       const p2 = players[offset + 1];
@@ -355,7 +378,7 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
       }
 
       currentMatches.push({
-        court: c + 1,
+        court: courtsConfig[c].courtNumber,
         player1: p1,
         player2: p2,
         player3: p3,
@@ -901,6 +924,11 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
 // Generate next draft round (Admin only)
 app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, async (req, res) => {
   const sessionId = req.params.id;
+  const { courtsConfig } = req.body;
+
+  if (!courtsConfig || !Array.isArray(courtsConfig) || courtsConfig.length < 1 || courtsConfig.length > 4) {
+    return res.status(400).json({ error: 'Valid courts configuration required (1 to 4 courts)' });
+  }
 
   try {
     const session = await db.get('SELECT * FROM sessions WHERE id = ?', [sessionId]);
@@ -913,8 +941,9 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
       WHERE s.session_id = ? AND s.status = 'approved'
     `, [sessionId]);
 
-    if (approvedPlayers.length !== 16) {
-      return res.status(400).json({ error: `Exactly 16 approved players are required. Currently there are ${approvedPlayers.length} approved players.` });
+    const requiredPlayers = courtsConfig.length * 4;
+    if (approvedPlayers.length < requiredPlayers) {
+      return res.status(400).json({ error: `At least ${requiredPlayers} approved players are required for ${courtsConfig.length} courts. Currently there are ${approvedPlayers.length} approved players.` });
     }
 
     // Determine the next round number
@@ -922,7 +951,7 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
     const nextRoundNumber = (lastMatch?.max_round || 0) + 1;
 
     // Generate optimal pairings
-    const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers);
+    const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers, courtsConfig);
 
     res.json({ round_number: nextRoundNumber, pairings });
   } catch (err) {
@@ -935,11 +964,23 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
   const sessionId = req.params.id;
   const { round_number, pairings } = req.body;
 
-  if (!round_number || !pairings || pairings.length !== 4) {
-    return res.status(400).json({ error: 'Valid round number and 4 match pairings are required' });
+  if (!round_number || !pairings || pairings.length < 1 || pairings.length > 4) {
+    return res.status(400).json({ error: 'Valid round number and 1 to 4 match pairings are required' });
   }
 
   try {
+    // Validate that all players submitted in the pairings are actually approved for this session
+    const approvedPlayers = await db.all(`SELECT player_id FROM signups WHERE session_id = ? AND status = 'approved'`, [sessionId]);
+    const validPlayerIds = new Set(approvedPlayers.map(p => p.player_id));
+
+    for (const match of pairings) {
+      for (const p of [match.player1, match.player2, match.player3, match.player4]) {
+        if (!validPlayerIds.has(p.id)) {
+          return res.status(400).json({ error: `Player ID ${p.id} (${p.name || ''}) is not approved for this session.` });
+        }
+      }
+    }
+
     // Start database transaction
     await db.run('BEGIN TRANSACTION');
 
