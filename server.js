@@ -147,6 +147,47 @@ async function initDb() {
   }
 }
 
+/**
+ * Returns a map of player ID to their differentiated display name.
+ * If two or more players share the same first name (case-insensitive),
+ * they are differentiated by appending the first letter of their last name.
+ * Otherwise, only their first name is used.
+ */
+export async function getDifferentiatedNamesMap() {
+  if (!db) return new Map();
+  const players = await db.all('SELECT id, name FROM players');
+  const nameMap = new Map();
+  const groups = new Map();
+
+  for (const p of players) {
+    if (!p.name) continue;
+    const nameStr = p.name.trim();
+    const parts = nameStr.split(/\s+/);
+    const firstName = parts[0];
+    const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
+    const initial = lastName ? lastName[0].toUpperCase() : '';
+
+    const key = firstName.toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push({ id: p.id, nameStr, firstName, initial });
+  }
+
+  for (const [key, list] of groups.entries()) {
+    const isDuplicate = list.length > 1;
+    for (const item of list) {
+      if (isDuplicate && item.initial) {
+        nameMap.set(item.id, `${item.firstName} ${item.initial}.`);
+      } else {
+        nameMap.set(item.id, item.firstName);
+      }
+    }
+  }
+  return nameMap;
+}
+
+
 // ==========================================
 // 2. WEB PUSH NOTIFICATION SETUP
 // ==========================================
@@ -720,6 +761,10 @@ app.post('/api/push/subscribe', authenticateToken, async (req, res) => {
 app.get('/api/players', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const players = await db.all('SELECT id, name, gender, level, username, is_admin FROM players ORDER BY name ASC');
+    const nameMap = await getDifferentiatedNamesMap();
+    players.forEach(p => {
+      if (nameMap.has(p.id)) p.name = nameMap.get(p.id);
+    });
     res.json({ players });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -778,6 +823,20 @@ app.get('/api/sessions/current', authenticateToken, async (req, res) => {
       WHERE m.session_id = ?
       ORDER BY m.round_number ASC, m.court ASC
     `, [session.id]);
+
+    const nameMap = await getDifferentiatedNamesMap();
+    signups.forEach(s => {
+      if (nameMap.has(s.player_id)) {
+        s.name = nameMap.get(s.player_id);
+      }
+    });
+
+    matches.forEach(m => {
+      if (nameMap.has(m.player1)) m.p1_name = nameMap.get(m.player1);
+      if (nameMap.has(m.player2)) m.p2_name = nameMap.get(m.player2);
+      if (nameMap.has(m.player3)) m.p3_name = nameMap.get(m.player3);
+      if (nameMap.has(m.player4)) m.p4_name = nameMap.get(m.player4);
+    });
 
     res.json({ session, signups, matches });
   } catch (err) {
@@ -966,6 +1025,14 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
     // Generate optimal pairings
     const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers, courtsConfig, rules);
 
+    const nameMap = await getDifferentiatedNamesMap();
+    pairings.forEach(m => {
+      if (m.player1 && nameMap.has(m.player1.id)) m.player1.name = nameMap.get(m.player1.id);
+      if (m.player2 && nameMap.has(m.player2.id)) m.player2.name = nameMap.get(m.player2.id);
+      if (m.player3 && nameMap.has(m.player3.id)) m.player3.name = nameMap.get(m.player3.id);
+      if (m.player4 && nameMap.has(m.player4.id)) m.player4.name = nameMap.get(m.player4.id);
+    });
+
     res.json({ round_number: nextRoundNumber, pairings });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1029,13 +1096,17 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
 
     await db.run('COMMIT');
 
-    // Trigger Web Push Notifications in background
     // We send to all players telling them their court and partners
+    const nameMap = await getDifferentiatedNamesMap();
     for (const match of pairings) {
       const matchPlayers = [match.player1, match.player2, match.player3, match.player4];
+      const p1_name = nameMap.get(match.player1.id) || match.player1.name;
+      const p2_name = nameMap.get(match.player2.id) || match.player2.name;
+      const p3_name = nameMap.get(match.player3.id) || match.player3.name;
+      const p4_name = nameMap.get(match.player4.id) || match.player4.name;
       const payload = {
         title: `Round ${round_number} Pairings Published!`,
-        body: `Court ${match.court}: ${match.player1.name} & ${match.player2.name} VS ${match.player3.name} & ${match.player4.name}`,
+        body: `Court ${match.court}: ${p1_name} & ${p2_name} VS ${p3_name} & ${p4_name}`,
         url: '/'
       };
       // Send custom push notification per court to make it personal
@@ -1227,6 +1298,13 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
     // Fetch all players
     const players = await db.all('SELECT id, name, gender, level, picture_path FROM players WHERE is_admin = 0');
     
+    const nameMap = await getDifferentiatedNamesMap();
+    for (const p of players) {
+      if (nameMap.has(p.id)) {
+        p.name = nameMap.get(p.id);
+      }
+    }
+
     let matchesQuery = `
       SELECT player1, player2, player3, player4, team_a_score, team_b_score
       FROM matches 
