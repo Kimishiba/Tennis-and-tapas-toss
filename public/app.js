@@ -740,6 +740,10 @@ async function generateRoundDraft() {
 
         draftPairings = data.pairings;
         document.getElementById('admin-publish-btn').classList.remove('hidden');
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        const pubBottomContainer = document.getElementById('admin-publish-bottom-container');
+        if (pubBtnBottom) pubBtnBottom.classList.remove('hidden');
+        if (pubBottomContainer) pubBottomContainer.classList.remove('hidden');
 
         // Preview draft in pairings section
         document.getElementById('matches-section-title').textContent = `Active Pairings (Previewing Round ${data.round_number})`;
@@ -822,6 +826,8 @@ function validateDraftDuplicates() {
 
         const pubBtn = document.getElementById('admin-publish-btn');
         if (pubBtn) pubBtn.disabled = true;
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        if (pubBtnBottom) pubBtnBottom.disabled = true;
         const saveBtn = document.getElementById('admin-save-pairings-btn');
         if (saveBtn) saveBtn.disabled = true;
 
@@ -829,6 +835,8 @@ function validateDraftDuplicates() {
     } else {
         const pubBtn = document.getElementById('admin-publish-btn');
         if (pubBtn) pubBtn.disabled = false;
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        if (pubBtnBottom) pubBtnBottom.disabled = false;
         const saveBtn = document.getElementById('admin-save-pairings-btn');
         if (saveBtn) saveBtn.disabled = false;
         
@@ -867,6 +875,10 @@ async function publishActiveRound() {
         alert(`Round ${nextRound} published and notifications sent!`);
         draftPairings = null;
         document.getElementById('admin-publish-btn').classList.add('hidden');
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        const pubBottomContainer = document.getElementById('admin-publish-bottom-container');
+        if (pubBtnBottom) pubBtnBottom.classList.add('hidden');
+        if (pubBottomContainer) pubBottomContainer.classList.add('hidden');
         loadDashboardData();
     } catch (err) {
         alert(err.message);
