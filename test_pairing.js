@@ -1,6 +1,6 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import { generatePairings, setDb, db } from './server.js';
+import { generatePairings, setDb, db, getDifferentiatedNamesMap } from './server.js';
 
 async function runSimulation() {
   console.log('=== TENNIS TOSS PAIRING SIMULATION START ===\n');
@@ -235,6 +235,65 @@ async function runSimulation() {
   } else {
     console.error('\n❌ AUDIT FAILS. Core constraints were violated. Review the output log details above.');
     process.exit(1);
+  }
+
+  // 5. TEST NAME DIFFERENTIATION
+  console.log('\n=== TESTING NAME DIFFERENTIATION ===');
+  // Clear players table
+  await testDb.run('DELETE FROM players');
+  // Insert players with potential first name collisions
+  const testPlayers = [
+    { name: 'Arthur Pro', gender: 'M', level: 1, username: 'tp1' },
+    { name: 'Bob Mid', gender: 'M', level: 4, username: 'tp2' },
+    { name: 'Bob Low', gender: 'M', level: 6, username: 'tp3' },
+    { name: 'Alice', gender: 'F', level: 2, username: 'tp4' },
+    { name: 'Alice Cooper', gender: 'F', level: 5, username: 'tp5' },
+    { name: 'John Smith', gender: 'M', level: 3, username: 'tp6' },
+    { name: 'John Smith', gender: 'M', level: 4, username: 'tp7' }, // identical full name
+  ];
+
+  for (const p of testPlayers) {
+    await testDb.run(
+      'INSERT INTO players (name, gender, level, username, password_hash) VALUES (?, ?, ?, ?, ?)',
+      [p.name, p.gender, p.level, p.username, 'mockhash']
+    );
+  }
+
+  const nameMap = await getDifferentiatedNamesMap();
+  
+  // Let's retrieve by name and verify
+  const playersFromDb = await testDb.all('SELECT id, name, username FROM players');
+  const findFormattedName = (username) => {
+    const p = playersFromDb.find(x => x.username === username);
+    return nameMap.get(p.id);
+  };
+
+  const tests = [
+    { username: 'tp1', expected: 'Arthur' }, // Unique first name
+    { username: 'tp2', expected: 'Bob M.' }, // Colliding first name
+    { username: 'tp3', expected: 'Bob L.' }, // Colliding first name
+    { username: 'tp4', expected: 'Alice' }, // Colliding but one has no last name
+    { username: 'tp5', expected: 'Alice C.' }, // Colliding but other has no last name
+    { username: 'tp6', expected: 'John S.' }, // Colliding, identical initials
+    { username: 'tp7', expected: 'John S.' }, // Colliding, identical initials
+  ];
+
+  let nameDiffFailed = false;
+  for (const t of tests) {
+    const actual = findFormattedName(t.username);
+    if (actual !== t.expected) {
+      console.error(`🚨 Name differentiation failed for ${t.username}! Expected: '${t.expected}', Actual: '${actual}'`);
+      nameDiffFailed = true;
+    } else {
+      console.log(`✓ ${t.username} correctly formatted as '${actual}'`);
+    }
+  }
+
+  if (nameDiffFailed) {
+    console.error('❌ NAME DIFFERENTIATION TEST FAILED.');
+    process.exit(1);
+  } else {
+    console.log('✅ NAME DIFFERENTIATION TEST PASSED SUCCESSFULLY!');
   }
 
   await testDb.close();
