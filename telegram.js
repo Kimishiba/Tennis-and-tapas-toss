@@ -298,13 +298,29 @@ async function handleNaturalLanguageManage(ctx, text) {
         if (m.player4 === playerB.id) { matchB = m; slotB = 'player4'; }
       }
 
-      if (!matchA) return ctx.reply(`❌ Player ${playerA.name} is not assigned to any match in Round ${activeRound}.`);
-      if (!matchB) return ctx.reply(`❌ Player ${playerB.name} is not assigned to any match in Round ${activeRound}.`);
+      if (!matchA && !matchB) {
+        return ctx.reply(`❌ Neither ${playerA.name} nor ${playerB.name} are assigned to any match in Round ${activeRound}.`);
+      }
 
-      if (matchA.id === matchB.id && slotA === slotB) {
+      if (matchA && matchB && matchA.id === matchB.id && slotA === slotB) {
         return ctx.reply(`😊 ${playerA.name} and ${playerB.name} are the same person!`);
       }
 
+      if (!matchA) {
+        // Player A is resting, Player B is playing. Substitute A for B.
+        await dbRef.run(`UPDATE matches SET ${slotB} = ? WHERE id = ?`, [playerA.id, matchB.id]);
+        await postUpdatedPairings(ctx, session.id, activeRound);
+        return;
+      }
+
+      if (!matchB) {
+        // Player B is resting, Player A is playing. Substitute B for A.
+        await dbRef.run(`UPDATE matches SET ${slotA} = ? WHERE id = ?`, [playerB.id, matchA.id]);
+        await postUpdatedPairings(ctx, session.id, activeRound);
+        return;
+      }
+
+      // Both are playing, perform swap
       await dbRef.run(`UPDATE matches SET ${slotA} = ? WHERE id = ?`, [playerB.id, matchA.id]);
       await dbRef.run(`UPDATE matches SET ${slotB} = ? WHERE id = ?`, [playerA.id, matchB.id]);
 
