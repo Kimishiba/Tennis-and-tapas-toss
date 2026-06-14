@@ -148,7 +148,10 @@ async function initDb() {
   }
 
   // Initialize WhatsApp in the background
-  initWhatsApp(dbDir).catch(err => {
+  initWhatsApp(dbDir, db, {
+    generatePairings,
+    getDifferentiatedNamesMap
+  }).catch(err => {
     console.error('Failed to initialize WhatsApp connection:', err);
   });
 }
