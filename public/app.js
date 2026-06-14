@@ -586,6 +586,19 @@ function populateAdminPairingControls(signups) {
     if (adminPanel) adminPanel.classList.remove('hidden');
     if (completeContainer) completeContainer.classList.remove('hidden');
     
+    // Auto-select max possible courts based on current approved players
+    const approvedCount = currentAdminSignups.filter(s => s.status === 'approved').length;
+    const numCourtsSelect = document.getElementById('num-courts-select');
+    if (numCourtsSelect && approvedCount > 0) {
+        const possibleCourts = Math.min(4, Math.floor(approvedCount / 4));
+        if (possibleCourts >= 1) {
+            numCourtsSelect.value = possibleCourts.toString();
+        } else {
+            numCourtsSelect.value = "1";
+        }
+        updateCourtInputs();
+    }
+
     loadRulePreferences();
     validateAdminGeneration();
 }
