@@ -37,9 +37,21 @@ export async function initWhatsApp(dbDir) {
       }
 
       if (connection === 'close') {
-        const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+        const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
+        const shouldReconnect = !isLoggedOut;
         console.log('WhatsApp connection closed due to ', lastDisconnect?.error, ', reconnecting: ', shouldReconnect);
         isConnected = false;
+        
+        if (isLoggedOut) {
+          console.log('Session is logged out or unauthorized. Clearing credentials to allow re-linking...');
+          try {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+          } catch (e) {
+            console.error('Failed to clear session directory:', e);
+          }
+        }
+
         if (shouldReconnect) {
           connectToWhatsApp();
         }
