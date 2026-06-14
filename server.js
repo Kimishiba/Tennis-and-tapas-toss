@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { OAuth2Client } from 'google-auth-library';
 import { initWhatsApp, sendGroupNotification, getWhatsAppStatus } from './whatsapp.js';
+import { initTelegram, sendTelegramNotification } from './telegram.js';
 
 const googleClient = new OAuth2Client();
 
@@ -153,6 +154,14 @@ async function initDb() {
     getDifferentiatedNamesMap
   }).catch(err => {
     console.error('Failed to initialize WhatsApp connection:', err);
+  });
+
+  // Initialize Telegram in the background
+  initTelegram(db, {
+    generatePairings,
+    getDifferentiatedNamesMap
+  }).catch(err => {
+    console.error('Failed to initialize Telegram connection:', err);
   });
 }
 
@@ -1208,8 +1217,12 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
       sendGroupNotification(waMessage).catch(err => {
         console.error('Failed to send WhatsApp group notification:', err);
       });
+
+      sendTelegramNotification(waMessage).catch(err => {
+        console.error('Failed to send Telegram group notification:', err);
+      });
     } catch (waErr) {
-      console.error('Error constructing WhatsApp group notification:', waErr);
+      console.error('Error constructing group notifications:', waErr);
     }
 
     // Send notifications to resting players
