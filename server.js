@@ -967,9 +967,11 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
     const playersNeeded = Math.max(0, 16 - existingPlayers.length);
     
     if (playersNeeded > 0) {
+      const maxPlayer = await db.get("SELECT MAX(id) as max_id FROM players");
+      const startIdx = (maxPlayer?.max_id || 0) + 1;
       const genders = ['M', 'F'];
       for (let i = 0; i < playersNeeded; i++) {
-        const idx = existingPlayers.length + i + 1;
+        const idx = startIdx + i;
         const name = `Player ${idx}`;
         const gender = genders[i % 2];
         const level = Math.floor(Math.random() * 9) + 1;
