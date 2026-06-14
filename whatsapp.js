@@ -109,13 +109,34 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
 
       // 1. !in Command
       if (/^!in(\s+.*)?$/i.test(text)) {
-        let nameToIn = text.replace(/^!in/i, '').trim();
-        // If they just write !in, use the pushName from WhatsApp
+        const commandArgs = text.replace(/^!in/i, '').trim();
+        let nameToIn = '';
+        let genderInput = null;
+        let levelInput = null;
+
+        if (commandArgs) {
+          // Parse comma-separated arguments
+          const parts = commandArgs.split(',');
+          nameToIn = parts[0] ? parts[0].trim() : '';
+          
+          if (parts[1]) {
+            const g = parts[1].trim().toUpperCase();
+            if (g === 'M' || g === 'F') genderInput = g;
+          }
+          
+          if (parts[2]) {
+            const l = parseInt(parts[2].trim(), 10);
+            if (!isNaN(l) && l >= 1 && l <= 9) levelInput = l;
+          }
+        }
+
+        // If no name was parsed/provided, fall back to pushName
         if (!nameToIn) {
           nameToIn = msg.pushName || '';
         }
+
         if (!nameToIn) {
-          await sock.sendMessage(groupJid, { text: `❌ Could not detect your name. Please use: !in [Your Name]` });
+          await sock.sendMessage(groupJid, { text: `❌ Could not detect your name. Please use: !in [Name], [Gender: M/F], [Level: 1-9]` });
           return;
         }
 
@@ -131,8 +152,8 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
           // Check if player exists
           let player = await dbRef.get("SELECT * FROM players WHERE LOWER(name) = LOWER(?)", [nameToIn]);
           if (!player) {
-            const gender = guessGender(nameToIn);
-            const level = Math.floor(Math.random() * 5) + 3; // level 3-7
+            const gender = genderInput || guessGender(nameToIn);
+            const level = levelInput || Math.floor(Math.random() * 5) + 3; // level 3-7
             const firstWord = nameToIn.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
             const username = `${firstWord}${Date.now().toString().slice(-4)}@example.com`;
 
@@ -141,6 +162,27 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
               [nameToIn, gender, level, username]
             );
             player = { id: insertRes.lastID, name: nameToIn, gender, level };
+          } else {
+            // Update gender or level if explicitly provided and different
+            let needsUpdate = false;
+            let queryParts = [];
+            let queryArgs = [];
+            if (genderInput && player.gender !== genderInput) {
+              queryParts.push("gender = ?");
+              queryArgs.push(genderInput);
+              player.gender = genderInput;
+              needsUpdate = true;
+            }
+            if (levelInput && player.level !== levelInput) {
+              queryParts.push("level = ?");
+              queryArgs.push(levelInput);
+              player.level = levelInput;
+              needsUpdate = true;
+            }
+            if (needsUpdate) {
+              queryArgs.push(player.id);
+              await dbRef.run(`UPDATE players SET ${queryParts.join(', ')} WHERE id = ?`, queryArgs);
+            }
           }
 
           // Register in signups
@@ -155,7 +197,7 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
           )).length;
 
           await sock.sendMessage(groupJid, {
-            text: `✅ ${player.name} is checked in! Total checked-in players: ${approvedCount}.`
+            text: `✅ ${player.name} (${player.gender}, Level ${player.level}) is checked in! Total checked-in players: ${approvedCount}.`
           });
         } catch (err) {
           console.error('Error in !in command:', err);
