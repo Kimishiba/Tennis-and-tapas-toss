@@ -426,11 +426,13 @@ export async function initTelegram(dbInstance, helpers = {}) {
           
           if (parts[1]) {
             const g = parts[1].trim().toUpperCase();
-            if (g === 'M' || g === 'F') genderInput = g;
+            if (g.startsWith('M') || g === 'MALE') genderInput = 'M';
+            else if (g.startsWith('F') || g === 'FEMALE') genderInput = 'F';
           }
           
           if (parts[2]) {
-            const l = parseInt(parts[2].trim(), 10);
+            const levelStr = parts[2].trim().replace(/\D/g, '');
+            const l = parseInt(levelStr, 10);
             if (!isNaN(l) && l >= 1 && l <= 9) levelInput = l;
           }
         }
