@@ -1011,12 +1011,22 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
       const maxPlayer = await db.get("SELECT MAX(id) as max_id FROM players");
       const startIdx = (maxPlayer?.max_id || 0) + 1;
       const genders = ['M', 'F'];
+      const maleNames = ['Alessandro', 'Javier', 'Richard', 'John', 'Arthur', 'Bob', 'Frank', 'David', 'George', 'Harry', 'Ethan', 'Liam', 'Michael', 'Thomas', 'James', 'Daniel'];
+      const femaleNames = ['Sofia', 'Alice', 'Fiona', 'Emma', 'Helen', 'Diana', 'Grace', 'Beatrice', 'Chloe', 'Olivia', 'Ava', 'Isabella', 'Mia', 'Charlotte', 'Amelia', 'Sophia'];
+      const lastNames = ['Longoni', 'Perez', 'Smith', 'Cooper', 'Miller', 'Jones', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'White', 'Harris', 'Martin', 'Clark'];
+
       for (let i = 0; i < playersNeeded; i++) {
         const idx = startIdx + i;
-        const name = `Player ${idx}`;
         const gender = genders[i % 2];
+        const firstName = gender === 'M'
+          ? maleNames[Math.floor(Math.random() * maleNames.length)]
+          : femaleNames[Math.floor(Math.random() * femaleNames.length)];
+        const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+        const name = `${firstName} ${lastName}`;
+        const cleanName = firstName.toLowerCase().replace(/[^a-z]/g, '');
+        const username = `${cleanName}${idx}@example.com`;
+
         const level = Math.floor(Math.random() * 9) + 1;
-        const username = `player${idx}@example.com`;
         await db.run(
           "INSERT INTO players (name, gender, level, username, is_admin) VALUES (?, ?, ?, ?, 0)",
           [name, gender, level, username]
