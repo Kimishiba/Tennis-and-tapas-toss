@@ -14,11 +14,11 @@ export async function initWhatsApp(dbDir) {
     fs.mkdirSync(sessionDir, { recursive: true });
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version, isLatest } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307], isLatest: false }));
   console.log(`Using WhatsApp Web v${version.join('.')}, isLatest: ${isLatest}`);
 
-  const connectToWhatsApp = () => {
+  const connectToWhatsApp = async () => {
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
     sock = makeWASocket({
       version,
       auth: state,
@@ -50,10 +50,10 @@ export async function initWhatsApp(dbDir) {
           } catch (e) {
             console.error('Failed to clear session directory:', e);
           }
-        }
-
-        if (shouldReconnect) {
-          connectToWhatsApp();
+          // Connect again with fresh auth state to generate QR code after a short delay
+          setTimeout(connectToWhatsApp, 1000);
+        } else if (shouldReconnect) {
+          setTimeout(connectToWhatsApp, 1000);
         }
       } else if (connection === 'open') {
         lastQr = null;
