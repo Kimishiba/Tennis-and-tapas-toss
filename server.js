@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { OAuth2Client } from 'google-auth-library';
 import { initWhatsApp, sendGroupNotification, getWhatsAppStatus } from './whatsapp.js';
-import { initTelegram, sendTelegramNotification } from './telegram.js';
+import { initTelegram, sendTelegramNotification, getTelegramStatus } from './telegram.js';
 
 export const logBuffer = [];
 const originalLog = console.log;
@@ -177,7 +177,8 @@ async function initDb() {
   initWhatsApp(dbDir, db, {
     generatePairings,
     getDifferentiatedNamesMap,
-    sendTelegramNotification
+    sendTelegramNotification,
+    getTelegramStatus
   }).catch(err => {
     console.error('Failed to initialize WhatsApp connection:', err);
   });

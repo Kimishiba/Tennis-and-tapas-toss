@@ -64,6 +64,12 @@ const parseHeuristics = (text) => {
     return { action: 'UPDATE_PLAYER_LEVEL', playerA: match[1].trim(), level: parseInt(match[2], 10) };
   }
 
+  // 6. Generate pairings
+  match = t.match(/(?:generate|make|create|draw)\s+(?:next\s+)?pairings?(?:\s+round)?/i);
+  if (match) {
+    return { action: 'GENERATE_PAIRINGS' };
+  }
+
   return { action: 'UNKNOWN' };
 };
 
@@ -80,10 +86,11 @@ Intents support:
 3. SWAP_PLAYERS: User wants to swap two players in the pairings. E.g., "swap Bob and Alice".
 4. MOVE_PLAYER: User wants to move a player to a specific court. E.g., "move Bob to Court 2".
 5. UPDATE_PLAYER_LEVEL: User wants to update a player's level. E.g., "set Alice level to 8", "change Bob's level to 5", "update Mark to level 6".
+6. GENERATE_PAIRINGS: User wants to generate pairings for the next round. E.g., "generate pairings", "make the next round", "draw next pairings".
 
 Output EXACTLY a JSON block with the following fields:
 {
-  "action": "SET_COURTS" | "RENAME_COURT" | "SWAP_PLAYERS" | "MOVE_PLAYER" | "UPDATE_PLAYER_LEVEL" | "UNKNOWN",
+  "action": "SET_COURTS" | "RENAME_COURT" | "SWAP_PLAYERS" | "MOVE_PLAYER" | "UPDATE_PLAYER_LEVEL" | "GENERATE_PAIRINGS" | "UNKNOWN",
   "courts": ["Court A", "Court B"], // List of court names for SET_COURTS
   "playerA": "Alice", // Player name for SWAP_PLAYERS, MOVE_PLAYER, or UPDATE_PLAYER_LEVEL
   "playerB": "Bob", // Player name to swap with for SWAP_PLAYERS
@@ -218,6 +225,83 @@ async function handleNaturalLanguageManage(ctx, text) {
     const session = await dbRef.get("SELECT * FROM sessions WHERE status = 'open' OR status = 'active' ORDER BY id DESC LIMIT 1");
     if (!session) {
       return ctx.reply('❌ No active session found.');
+    }
+
+    if (intent.action === 'GENERATE_PAIRINGS') {
+      const approvedPlayers = await dbRef.all(`
+        SELECT p.id, p.name, p.gender, p.level FROM signups s
+        JOIN players p ON s.player_id = p.id
+        WHERE s.session_id = ? AND s.status = 'approved'
+      `, [session.id]);
+
+      if (approvedPlayers.length === 0) {
+        return ctx.reply('❌ Cannot generate pairings: No players are currently checked in.');
+      }
+
+      let courtsConfig = [];
+      if (session.courts_json) {
+        try {
+          const parsed = JSON.parse(session.courts_json);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            courtsConfig = parsed.map(c => typeof c === 'string' ? { courtNumber: c } : c);
+          }
+        } catch (e) {
+          console.error('[Telegram Bot] Failed to parse courts_json:', e);
+        }
+      }
+      if (courtsConfig.length === 0) {
+        const numCourts = Math.max(1, Math.floor(approvedPlayers.length / 4));
+        for (let i = 1; i <= numCourts; i++) {
+          courtsConfig.push({ courtNumber: i.toString() });
+        }
+      }
+
+      const lastMatch = await dbRef.get('SELECT MAX(round_number) as max_round FROM matches WHERE session_id = ?', [session.id]);
+      const nextRound = (lastMatch?.max_round || 0) + 1;
+
+      const pairings = await serverHelpers.generatePairings(session.id, nextRound, approvedPlayers, courtsConfig, {});
+      if (!pairings || pairings.length === 0) {
+        return ctx.reply('❌ Failed to generate pairings.');
+      }
+
+      for (const m of pairings) {
+        await dbRef.run(`
+          INSERT INTO matches (
+            session_id, round_number, court,
+            player1, player2, player3, player4,
+            team_a_score, team_b_score
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+        `, [
+          session.id, nextRound, m.court,
+          m.player1.id, m.player2.id, m.player3.id, m.player4.id
+        ]);
+      }
+
+      const nameMap = await serverHelpers.getDifferentiatedNamesMap();
+      const formatPlayer = (p) => (p && nameMap.has(p.id)) ? nameMap.get(p.id) : (p ? p.name : 'TBD');
+
+      let responseText = `🎾 *ROUND ${nextRound} PAIRINGS GENERATED!*\n\n`;
+      pairings.forEach((m) => {
+        responseText += `*Court ${m.court}*\n`;
+        responseText += `${formatPlayer(m.player1)} & ${formatPlayer(m.player2)} vs ${formatPlayer(m.player3)} & ${formatPlayer(m.player4)}\n\n`;
+      });
+
+      await ctx.replyWithMarkdownV2(
+        responseText
+          .replace(/\./g, '\\.')
+          .replace(/-/g, '\\-')
+          .replace(/\!/g, '\\!')
+          .replace(/\(/g, '\\(')
+          .replace(/\)/g, '\\)')
+          .replace(/\+/g, '\\+')
+      );
+
+      if (serverHelpers.sendWhatsAppNotification) {
+        serverHelpers.sendWhatsAppNotification(responseText).catch(err => {
+          console.error('[Telegram Bot] Failed to send WhatsApp notification:', err);
+        });
+      }
+      return;
     }
 
     if (intent.action === 'SET_COURTS') {
@@ -866,4 +950,8 @@ export async function sendTelegramNotification(message) {
   } catch (err) {
     console.error('[Telegram Notification] Failed to send message to Telegram:', err);
   }
+}
+
+export function getTelegramStatus() {
+  return { isConnected };
 }
