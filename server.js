@@ -1121,7 +1121,8 @@ app.get('/api/bot-status', async (req, res) => {
         geminiKeySet: !!process.env.GEMINI_API_KEY
       },
       whatsapp: {
-        connected: getWhatsAppStatus ? (getWhatsAppStatus()?.status === 'connected') : false
+        connected: getWhatsAppStatus ? !!getWhatsAppStatus()?.isConnected : false,
+        qr: getWhatsAppStatus ? getWhatsAppStatus()?.qr : null
       },
       logs: logBuffer
     });
