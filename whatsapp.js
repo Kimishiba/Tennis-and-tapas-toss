@@ -252,10 +252,10 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
           for (const m of pairings) {
             await dbRef.run(`
               INSERT INTO matches (
-                session_id, round_number, court_number,
+                session_id, round_number, court,
                 player1, player2, player3, player4,
-                score1, score2, is_published
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1)
+                team_a_score, team_b_score
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
             `, [
               session.id, nextRound, m.court,
               m.player1.id, m.player2.id, m.player3.id, m.player4.id
@@ -272,6 +272,12 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
           });
 
           await sock.sendMessage(groupJid, { text: responseText });
+
+          if (serverHelpers.sendTelegramNotification) {
+            serverHelpers.sendTelegramNotification(responseText).catch(err => {
+              console.error('Failed to send Telegram notification:', err);
+            });
+          }
         } catch (err) {
           console.error('Error in !generate command:', err);
           await sock.sendMessage(groupJid, { text: `❌ Error: ${err.message}` });

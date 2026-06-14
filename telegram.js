@@ -18,6 +18,369 @@ const guessGender = (name) => {
   return 'M';
 };
 
+// Option A: Rule/Regex Heuristic parser
+const parseHeuristics = (text) => {
+  const t = text.toLowerCase().trim();
+  
+  // 1. Set courts count/list
+  let match = t.match(/(?:set|change|have|got)\s+(?:the\s+)?(?:number of\s+)?courts?\s+(?:to\s+)?(\d+)/i);
+  if (match) {
+    const count = parseInt(match[1], 10);
+    const courts = [];
+    for (let i = 1; i <= count; i++) courts.push(`Court ${i}`);
+    return { action: 'SET_COURTS', courts };
+  }
+
+  // e.g. "courts are center, clay, hard"
+  match = t.match(/courts?\s+(?:are|setup|to|names?)\s+(.+)/i);
+  if (match) {
+    const list = match[1].split(',').map(s => s.trim().replace(/^and\s+/i, '').trim()).filter(Boolean);
+    if (list.length > 0) {
+      return { action: 'SET_COURTS', courts: list.map(name => name.charAt(0).toUpperCase() + name.slice(1)) };
+    }
+  }
+
+  // 2. Rename court
+  match = t.match(/rename\s+(?:court\s+)?(.+?)\s+to\s+(.+)/i);
+  if (match) {
+    return { action: 'RENAME_COURT', oldCourtName: match[1].trim(), courtName: match[2].trim() };
+  }
+
+  // 3. Swap players
+  match = t.match(/swap\s+(.+?)\s+and\s+(.+)/i);
+  if (match) {
+    return { action: 'SWAP_PLAYERS', playerA: match[1].trim(), playerB: match[2].trim() };
+  }
+
+  // 4. Move player
+  match = t.match(/move\s+(.+?)\s+to\s+(?:court\s+)?(.+)/i);
+  if (match) {
+    return { action: 'MOVE_PLAYER', playerA: match[1].trim(), courtName: match[2].trim() };
+  }
+
+  return { action: 'UNKNOWN' };
+};
+
+// Option B: Gemini AI Parser
+const parseWithGemini = async (apiKey, text) => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  
+  const systemInstruction = `You are a bot administrator assistant for a tennis toss matchmaking system.
+Analyze the user's input and extract their administrative intent into a structured JSON object.
+
+Intents support:
+1. SET_COURTS: User wants to set the number of courts or specify a list of court names. E.g., "we have 3 courts today", "courts are center, court 2, court 3".
+2. RENAME_COURT: User wants to rename a specific court. E.g., "rename court 1 to Main Court".
+3. SWAP_PLAYERS: User wants to swap two players in the pairings. E.g., "swap Bob and Alice".
+4. MOVE_PLAYER: User wants to move a player to a specific court. E.g., "move Bob to Court 2".
+
+Output EXACTLY a JSON block with the following fields:
+{
+  "action": "SET_COURTS" | "RENAME_COURT" | "SWAP_PLAYERS" | "MOVE_PLAYER" | "UNKNOWN",
+  "courts": ["Court A", "Court B"], // List of court names for SET_COURTS
+  "playerA": "Alice", // Player name for SWAP_PLAYERS or MOVE_PLAYER
+  "playerB": "Bob", // Player name to swap with for SWAP_PLAYERS
+  "courtName": "Center Court", // Target court name for MOVE_PLAYER or RENAME_COURT
+  "oldCourtName": "Court 1" // Court name to change from for RENAME_COURT
+}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: `System Instructions:\n${systemInstruction}\n\nUser Input:\n"${text}"` }
+            ]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json'
+        }
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP status ${response.status}`);
+    }
+    const data = await response.json();
+    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (resultText) {
+      return JSON.parse(resultText);
+    }
+  } catch (err) {
+    console.error('[Telegram Bot] Gemini parse error, falling back to heuristics:', err);
+  }
+  return null;
+};
+
+// Post updated pairings to chat and sync to WhatsApp
+async function postUpdatedPairings(ctx, sessionId, roundNumber) {
+  try {
+    const pairings = await dbRef.all(`
+      SELECT m.*, 
+        p1.name as p1_name, p1.gender as p1_gender, p1.level as p1_level,
+        p2.name as p2_name, p2.gender as p2_gender, p2.level as p2_level,
+        p3.name as p3_name, p3.gender as p3_gender, p3.level as p3_level,
+        p4.name as p4_name, p4.gender as p4_gender, p4.level as p4_level
+      FROM matches m
+      JOIN players p1 ON m.player1 = p1.id
+      JOIN players p2 ON m.player2 = p2.id
+      JOIN players p3 ON m.player3 = p3.id
+      JOIN players p4 ON m.player4 = p4.id
+      WHERE m.session_id = ? AND m.round_number = ?
+      ORDER BY m.court ASC
+    `, [sessionId, roundNumber]);
+
+    const nameMap = await serverHelpers.getDifferentiatedNamesMap();
+    const formatPlayer = (id, defaultName) => (id && nameMap.has(id)) ? nameMap.get(id) : defaultName;
+
+    let responseText = `🎾 *ROUND ${roundNumber} PAIRINGS UPDATED!*\n\n`;
+    pairings.forEach((m) => {
+      const p1 = formatPlayer(m.player1, m.p1_name);
+      const p2 = formatPlayer(m.player2, m.p2_name);
+      const p3 = formatPlayer(m.player3, m.p3_name);
+      const p4 = formatPlayer(m.player4, m.p4_name);
+      responseText += `*Court ${m.court}*\n`;
+      responseText += `${p1} & ${p2} vs ${p3} & ${p4}\n\n`;
+    });
+
+    await ctx.replyWithMarkdownV2(
+      responseText
+        .replace(/\./g, '\\.')
+        .replace(/-/g, '\\-')
+        .replace(/\!/g, '\\!')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)')
+        .replace(/\+/g, '\\+')
+    );
+
+    // Also sync to WhatsApp!
+    if (serverHelpers.sendWhatsAppNotification) {
+      serverHelpers.sendWhatsAppNotification(responseText).catch(err => {
+        console.error('[Telegram Bot] Failed to send WhatsApp notification:', err);
+      });
+    }
+  } catch (err) {
+    console.error('[Telegram Bot] Error printing updated pairings:', err);
+  }
+}
+
+// Handler execution engine
+async function handleNaturalLanguageManage(ctx, text) {
+  try {
+    let intent = null;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      intent = await parseWithGemini(apiKey, text);
+    }
+    
+    if (!intent || intent.action === 'UNKNOWN') {
+      intent = parseHeuristics(text);
+    }
+
+    if (!intent || intent.action === 'UNKNOWN') {
+      return ctx.reply('🤔 Sorry, I couldn\'t understand that command. Try something like:\n• "swap John and Mark"\n• "move Alice to Court 2"\n• "we have 3 courts today"\n• "rename court 1 to Central"');
+    }
+
+    const session = await dbRef.get("SELECT * FROM sessions WHERE status = 'open' OR status = 'active' ORDER BY id DESC LIMIT 1");
+    if (!session) {
+      return ctx.reply('❌ No active session found.');
+    }
+
+    if (intent.action === 'SET_COURTS') {
+      const courts = intent.courts;
+      if (!Array.isArray(courts) || courts.length === 0) {
+        return ctx.reply('❌ Invalid court configuration received.');
+      }
+      await dbRef.run("UPDATE sessions SET courts_json = ? WHERE id = ?", [JSON.stringify(courts), session.id]);
+      return ctx.reply(`✅ Active courts updated to:\n${courts.map(c => `• ${c}`).join('\n')}`);
+    }
+
+    if (intent.action === 'RENAME_COURT') {
+      const { oldCourtName, courtName } = intent;
+      if (!oldCourtName || !courtName) {
+        return ctx.reply('❌ Please specify the court you want to rename and its new name.');
+      }
+
+      let parsed = [];
+      if (session.courts_json) {
+        try { parsed = JSON.parse(session.courts_json); } catch(e){}
+      }
+      
+      const lastMatch = await dbRef.get('SELECT MAX(round_number) as max_round FROM matches WHERE session_id = ?', [session.id]);
+      const activeRound = lastMatch?.max_round || 1;
+      
+      if (parsed.length === 0) {
+        const uniqueCourts = await dbRef.all("SELECT DISTINCT court FROM matches WHERE session_id = ? AND round_number = ?", [session.id, activeRound]);
+        parsed = uniqueCourts.map(uc => uc.court.toString());
+      }
+
+      let renamed = false;
+      const updatedCourts = parsed.map(c => {
+        if (c.toString().toLowerCase() === oldCourtName.toLowerCase()) {
+          renamed = true;
+          return courtName;
+        }
+        return c;
+      });
+
+      if (!renamed) {
+        return ctx.reply(`❌ Could not find court named "${oldCourtName}" in the active setup.`);
+      }
+
+      await dbRef.run("UPDATE sessions SET courts_json = ? WHERE id = ?", [JSON.stringify(updatedCourts), session.id]);
+
+      // Update existing matches in active round
+      await dbRef.run(
+        "UPDATE matches SET court = ? WHERE session_id = ? AND round_number = ? AND LOWER(court) = LOWER(?)",
+        [courtName, session.id, activeRound, oldCourtName]
+      );
+
+      return ctx.reply(`✅ Renamed court "${oldCourtName}" to "${courtName}" in this session.`);
+    }
+
+    if (intent.action === 'SWAP_PLAYERS') {
+      const { playerA: pAName, playerB: pBName } = intent;
+      if (!pAName || !pBName) {
+        return ctx.reply('❌ Please specify both players to swap.');
+      }
+
+      const lastMatch = await dbRef.get('SELECT MAX(round_number) as max_round FROM matches WHERE session_id = ?', [session.id]);
+      const activeRound = lastMatch?.max_round;
+      if (!activeRound) {
+        return ctx.reply('❌ No matches have been generated yet for this session.');
+      }
+
+      const matches = await dbRef.all("SELECT * FROM matches WHERE session_id = ? AND round_number = ?", [session.id, activeRound]);
+      if (matches.length === 0) {
+        return ctx.reply('❌ No active matches found in the current round.');
+      }
+
+      const allPlayersInRound = await dbRef.all(`
+        SELECT p.id, p.name FROM players p
+        JOIN signups s ON p.id = s.player_id
+        WHERE s.session_id = ? AND s.status = 'approved'
+      `, [session.id]);
+
+      const findBestPlayer = (inputName) => {
+        const query = inputName.toLowerCase().trim();
+        let found = allPlayersInRound.find(p => p.name.toLowerCase() === query);
+        if (found) return found;
+        found = allPlayersInRound.find(p => p.name.toLowerCase().startsWith(query));
+        if (found) return found;
+        found = allPlayersInRound.find(p => p.name.toLowerCase().includes(query));
+        return found;
+      };
+
+      const playerA = findBestPlayer(pAName);
+      const playerB = findBestPlayer(pBName);
+
+      if (!playerA) return ctx.reply(`❌ Could not find player matching "${pAName}" in this session.`);
+      if (!playerB) return ctx.reply(`❌ Could not find player matching "${pBName}" in this session.`);
+
+      let matchA = null, slotA = null;
+      let matchB = null, slotB = null;
+
+      for (const m of matches) {
+        if (m.player1 === playerA.id) { matchA = m; slotA = 'player1'; }
+        if (m.player2 === playerA.id) { matchA = m; slotA = 'player2'; }
+        if (m.player3 === playerA.id) { matchA = m; slotA = 'player3'; }
+        if (m.player4 === playerA.id) { matchA = m; slotA = 'player4'; }
+
+        if (m.player1 === playerB.id) { matchB = m; slotB = 'player1'; }
+        if (m.player2 === playerB.id) { matchB = m; slotB = 'player2'; }
+        if (m.player3 === playerB.id) { matchB = m; slotB = 'player3'; }
+        if (m.player4 === playerB.id) { matchB = m; slotB = 'player4'; }
+      }
+
+      if (!matchA) return ctx.reply(`❌ Player ${playerA.name} is not assigned to any match in Round ${activeRound}.`);
+      if (!matchB) return ctx.reply(`❌ Player ${playerB.name} is not assigned to any match in Round ${activeRound}.`);
+
+      if (matchA.id === matchB.id && slotA === slotB) {
+        return ctx.reply(`😊 ${playerA.name} and ${playerB.name} are the same person!`);
+      }
+
+      await dbRef.run(`UPDATE matches SET ${slotA} = ? WHERE id = ?`, [playerB.id, matchA.id]);
+      await dbRef.run(`UPDATE matches SET ${slotB} = ? WHERE id = ?`, [playerA.id, matchB.id]);
+
+      await postUpdatedPairings(ctx, session.id, activeRound);
+      return;
+    }
+
+    if (intent.action === 'MOVE_PLAYER') {
+      const { playerA: pAName, courtName } = intent;
+      if (!pAName || !courtName) {
+        return ctx.reply('❌ Please specify the player and the target court.');
+      }
+
+      const lastMatch = await dbRef.get('SELECT MAX(round_number) as max_round FROM matches WHERE session_id = ?', [session.id]);
+      const activeRound = lastMatch?.max_round;
+      if (!activeRound) {
+        return ctx.reply('❌ No matches have been generated yet for this session.');
+      }
+
+      const matches = await dbRef.all("SELECT * FROM matches WHERE session_id = ? AND round_number = ?", [session.id, activeRound]);
+      if (matches.length === 0) {
+        return ctx.reply('❌ No active matches found in the current round.');
+      }
+
+      const allPlayersInRound = await dbRef.all(`
+        SELECT p.id, p.name FROM players p
+        JOIN signups s ON p.id = s.player_id
+        WHERE s.session_id = ? AND s.status = 'approved'
+      `, [session.id]);
+
+      const findBestPlayer = (inputName) => {
+        const query = inputName.toLowerCase().trim();
+        let found = allPlayersInRound.find(p => p.name.toLowerCase() === query);
+        if (found) return found;
+        found = allPlayersInRound.find(p => p.name.toLowerCase().startsWith(query));
+        if (found) return found;
+        found = allPlayersInRound.find(p => p.name.toLowerCase().includes(query));
+        return found;
+      };
+
+      const playerA = findBestPlayer(pAName);
+      if (!playerA) return ctx.reply(`❌ Could not find player matching "${pAName}" in this session.`);
+
+      let matchA = null, slotA = null;
+      for (const m of matches) {
+        if (m.player1 === playerA.id) { matchA = m; slotA = 'player1'; }
+        if (m.player2 === playerA.id) { matchA = m; slotA = 'player2'; }
+        if (m.player3 === playerA.id) { matchA = m; slotA = 'player3'; }
+        if (m.player4 === playerA.id) { matchA = m; slotA = 'player4'; }
+      }
+
+      if (!matchA) return ctx.reply(`❌ Player ${playerA.name} is not currently playing in Round ${activeRound}.`);
+
+      const targetMatch = matches.find(m => m.court.toString().toLowerCase() === courtName.toLowerCase() || m.court.toString() === courtName);
+      if (!targetMatch) {
+        return ctx.reply(`❌ Could not find active court named "${courtName}" in this round.`);
+      }
+
+      if (matchA.id === targetMatch.id) {
+        return ctx.reply(`😊 ${playerA.name} is already playing on court ${courtName}.`);
+      }
+
+      const playerBId = targetMatch[slotA];
+      await dbRef.run(`UPDATE matches SET ${slotA} = ? WHERE id = ?`, [playerBId, matchA.id]);
+      await dbRef.run(`UPDATE matches SET ${slotA} = ? WHERE id = ?`, [playerA.id, targetMatch.id]);
+
+      await postUpdatedPairings(ctx, session.id, activeRound);
+      return;
+    }
+
+  } catch (err) {
+    console.error('[Telegram Bot] Error managing pairings:', err);
+    return ctx.reply(`❌ Error processing request: ${err.message}`);
+  }
+}
+
 export async function initTelegram(dbInstance, helpers = {}) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -162,10 +525,22 @@ export async function initTelegram(dbInstance, helpers = {}) {
           return ctx.reply('❌ Cannot generate pairings: No players are currently checked in.');
         }
 
-        const numCourts = Math.max(1, Math.floor(approvedPlayers.length / 4));
-        const courtsConfig = [];
-        for (let i = 1; i <= numCourts; i++) {
-          courtsConfig.push({ courtNumber: i.toString() });
+        let courtsConfig = [];
+        if (session.courts_json) {
+          try {
+            const parsed = JSON.parse(session.courts_json);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              courtsConfig = parsed.map(c => typeof c === 'string' ? { courtNumber: c } : c);
+            }
+          } catch (e) {
+            console.error('[Telegram Bot] Failed to parse courts_json:', e);
+          }
+        }
+        if (courtsConfig.length === 0) {
+          const numCourts = Math.max(1, Math.floor(approvedPlayers.length / 4));
+          for (let i = 1; i <= numCourts; i++) {
+            courtsConfig.push({ courtNumber: i.toString() });
+          }
         }
 
         const lastMatch = await dbRef.get('SELECT MAX(round_number) as max_round FROM matches WHERE session_id = ?', [session.id]);
@@ -179,10 +554,10 @@ export async function initTelegram(dbInstance, helpers = {}) {
         for (const m of pairings) {
           await dbRef.run(`
             INSERT INTO matches (
-              session_id, round_number, court_number,
+              session_id, round_number, court,
               player1, player2, player3, player4,
-              score1, score2, is_published
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 1)
+              team_a_score, team_b_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
           `, [
             session.id, nextRound, m.court,
             m.player1.id, m.player2.id, m.player3.id, m.player4.id
@@ -207,9 +582,92 @@ export async function initTelegram(dbInstance, helpers = {}) {
             .replace(/\)/g, '\\)')
             .replace(/\+/g, '\\+')
         );
+
+        if (serverHelpers.sendWhatsAppNotification) {
+          serverHelpers.sendWhatsAppNotification(responseText).catch(err => {
+            console.error('[Telegram Bot] Failed to send WhatsApp notification:', err);
+          });
+        }
       } catch (err) {
         console.error('[Telegram Bot] Error in /generate command:', err);
         await ctx.reply(`❌ Error generating pairings: ${err.message}`);
+      }
+    });
+
+    // Command to manage pairings / courts naturally: /manage
+    bot.command('manage', async (ctx) => {
+      try {
+        const chatId = ctx.chat.id;
+        const userId = ctx.from.id;
+
+        // Verify if sender is a group admin
+        let isAdmin = false;
+        if (ctx.chat.type === 'private') {
+          isAdmin = true;
+        } else {
+          const chatMember = await ctx.telegram.getChatMember(chatId, userId);
+          isAdmin = chatMember.status === 'administrator' || chatMember.status === 'creator';
+        }
+
+        if (!isAdmin) {
+          return ctx.reply('❌ Only group administrators can manage pairings.');
+        }
+
+        const text = ctx.message.text || '';
+        const commandArgs = text.replace(/^\/manage\s*/i, '').trim();
+
+        if (!commandArgs) {
+          return ctx.reply('💡 Usage: /manage [instruction], e.g., "/manage swap John and Mark" or "/manage move Alice to court 2"');
+        }
+
+        await handleNaturalLanguageManage(ctx, commandArgs);
+      } catch (err) {
+        console.error('[Telegram Bot] Error in /manage command:', err);
+        await ctx.reply(`❌ Error: ${err.message}`);
+      }
+    });
+
+    // General message listener for direct message management or group mentions
+    bot.on('message', async (ctx) => {
+      try {
+        const text = ctx.message?.text || '';
+        if (!text) return;
+
+        // Skip commands
+        if (text.startsWith('/')) return;
+
+        const isDirectMessage = ctx.chat.type === 'private';
+        const botUsername = ctx.botInfo?.username;
+        const isMentioned = botUsername && text.includes(`@${botUsername}`);
+
+        if (!isDirectMessage && !isMentioned) {
+          return;
+        }
+
+        // Clean mention from text
+        let cleanedText = text;
+        if (botUsername) {
+          cleanedText = text.replace(new RegExp(`@${botUsername}`, 'gi'), '').trim();
+        }
+
+        if (!cleanedText) return;
+
+        // Verify if sender is a group admin
+        let isAdmin = false;
+        if (isDirectMessage) {
+          isAdmin = true;
+        } else {
+          const chatMember = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
+          isAdmin = chatMember.status === 'administrator' || chatMember.status === 'creator';
+        }
+
+        if (!isAdmin) {
+          return ctx.reply('❌ Only group administrators can manage pairings.');
+        }
+
+        await handleNaturalLanguageManage(ctx, cleanedText);
+      } catch (err) {
+        console.error('[Telegram Bot] Error in message listener:', err);
       }
     });
 
@@ -218,6 +676,7 @@ export async function initTelegram(dbInstance, helpers = {}) {
       `• /in \\- Check yourself in using your Telegram name\\.\n` +
       `• /in \\[Name\\], \\[Gender: M/F\\], \\[Level: 1\\-9\\] \\- Check in with custom details \\(e\\.g\\. \`/in Sofia, F, 6\`\\)\\.\n` +
       `• /generate \\- \\(Admins only\\) Generate pairings for the active session\\.\n` +
+      `• /manage \\[Instruction\\] \\- \\(Admins only\\) Manage courts or pairings naturally \\(e\\.g\\. \`/manage swap John and Mark\`\\).\n` +
       `• /help \\- Show this guide\\.`;
 
     bot.start(async (ctx) => {
@@ -232,6 +691,7 @@ export async function initTelegram(dbInstance, helpers = {}) {
     bot.telegram.setMyCommands([
       { command: 'in', description: 'Check in to play' },
       { command: 'generate', description: 'Generate pairings (Admins only)' },
+      { command: 'manage', description: 'Manage courts or pairings naturally' },
       { command: 'help', description: 'Show available commands' }
     ]).catch(err => console.error('[Telegram Bot] Failed to register menu commands:', err));
 

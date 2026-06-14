@@ -91,7 +91,8 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
-      status TEXT CHECK(status IN ('open', 'active', 'completed')) DEFAULT 'open'
+      status TEXT CHECK(status IN ('open', 'active', 'completed')) DEFAULT 'open',
+      courts_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS signups (
@@ -135,6 +136,12 @@ async function initDb() {
     // Column already exists
   }
 
+  try {
+    await db.exec('ALTER TABLE sessions ADD COLUMN courts_json TEXT');
+  } catch (e) {
+    // Column already exists
+  }
+
   // Create default admin if not exists
   const adminUsername = 'admin';
   const existingAdmin = await db.get('SELECT * FROM players WHERE username = ?', [adminUsername]);
@@ -151,7 +158,8 @@ async function initDb() {
   // Initialize WhatsApp in the background
   initWhatsApp(dbDir, db, {
     generatePairings,
-    getDifferentiatedNamesMap
+    getDifferentiatedNamesMap,
+    sendTelegramNotification
   }).catch(err => {
     console.error('Failed to initialize WhatsApp connection:', err);
   });
@@ -159,7 +167,8 @@ async function initDb() {
   // Initialize Telegram in the background
   initTelegram(db, {
     generatePairings,
-    getDifferentiatedNamesMap
+    getDifferentiatedNamesMap,
+    sendWhatsAppNotification: sendGroupNotification
   }).catch(err => {
     console.error('Failed to initialize Telegram connection:', err);
   });
