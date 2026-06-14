@@ -11,7 +11,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 # Copy server code and public assets
-COPY server.js fill_db.js ./
+COPY server.js fill_db.js whatsapp.js ./
 COPY public ./public
 
 # Expose the API port
