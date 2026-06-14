@@ -518,6 +518,7 @@
                         <div class="flex items-center gap-3">
                             <h3 class="font-headline-md text-headline-md uppercase">Checked-In Players</h3>
                             <button class="bg-primary-container border-2 border-on-background px-3 py-1 font-label-bold text-[10px] uppercase brutalist-shadow active-press" onclick="showQRCodeModal()">Show Check-In QR</button>
+                            <button id="admin-whatsapp-link-btn" class="bg-surface border-2 border-on-background text-on-surface px-3 py-1 font-label-bold text-[10px] uppercase brutalist-shadow active-press hover:bg-surface-variant transition-all" onclick="showWhatsAppQRModal()">Link WhatsApp</button>
                         </div>
                         <div class="flex flex-wrap gap-2 w-full sm:w-auto">
                             <button class="flex-1 sm:flex-initial bg-primary-container border-2 border-on-background text-on-primary-container px-4 py-3 md:px-3 md:py-2 font-label-bold text-label-bold uppercase brutalist-shadow active-press hover:bg-primary transition-all text-sm md:text-xs text-center" onclick="manuallyAddPlayerPrompt()">Add Player</button>
@@ -761,6 +762,20 @@
                 <img id="qr-image" class="w-48 h-48 bg-white" src="" alt="QR Code">
             </div>
             <button class="bg-red-700 text-white border-2 border-on-background py-3 font-label-bold text-label-bold uppercase brutalist-shadow active-press" onclick="closeQRCodeModal()">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- WhatsApp QR Code Modal (Admin WhatsApp link) -->
+    <div id="whatsapp-qr-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center hidden p-gutter">
+        <div class="bg-white brutalist-border-heavy p-6 max-w-sm w-full heavy-brutalist-shadow flex flex-col gap-4 text-center text-on-surface">
+            <h3 class="font-headline-md text-headline-md uppercase">Link WhatsApp Bot</h3>
+            <p class="font-body-md text-body-md" id="whatsapp-status-desc">Checking WhatsApp connection status...</p>
+            <div id="whatsapp-qr-wrapper" class="flex justify-center border-2 border-on-background p-4 bg-surface-container hidden">
+                <img id="whatsapp-qr-image" class="w-48 h-48 bg-white" src="" alt="WhatsApp QR Code">
+            </div>
+            <button class="bg-red-700 text-white border-2 border-on-background py-3 font-label-bold text-label-bold uppercase brutalist-shadow active-press" onclick="closeWhatsAppQRModal()">
                 Close
             </button>
         </div>

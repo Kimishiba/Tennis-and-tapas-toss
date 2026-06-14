@@ -6,6 +6,7 @@ import qrcode from 'qrcode-terminal';
 
 let sock = null;
 let isConnected = false;
+let lastQr = null;
 
 export async function initWhatsApp(dbDir) {
   const sessionDir = path.join(dbDir, 'whatsapp-session');
@@ -28,6 +29,7 @@ export async function initWhatsApp(dbDir) {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
+        lastQr = qr;
         console.log('================================================================');
         console.log('SCAN THIS QR CODE WITH WHATSAPP (Settings > Linked Devices):');
         console.log('================================================================');
@@ -42,6 +44,7 @@ export async function initWhatsApp(dbDir) {
           connectToWhatsApp();
         }
       } else if (connection === 'open') {
+        lastQr = null;
         console.log('================================================================');
         console.log('SUCCESS: WhatsApp client is now connected!');
         console.log('================================================================');
@@ -86,4 +89,8 @@ export async function sendGroupNotification(message) {
   } catch (err) {
     console.error('[WhatsApp Notification] Failed to send message to group:', err);
   }
+}
+
+export function getWhatsAppStatus() {
+  return { isConnected, qr: lastQr };
 }

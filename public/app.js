@@ -481,6 +481,7 @@ async function loadDashboardData() {
                 // Populate Admin Controls
                 populateAdminRoster(data.signups);
                 populateAdminPairingControls(data.signups);
+                fetchWhatsAppStatus();
             }
 
             // Populate active courts matches
@@ -1542,6 +1543,62 @@ window.loadProfileInsights = loadProfileInsights;
 // ==========================================
 // 7. INITIALIZATION ON LOAD
 // ==========================================
+// WhatsApp QR link modal functions
+let whatsappPollInterval = null;
+
+async function showWhatsAppQRModal() {
+    const modal = document.getElementById('whatsapp-qr-modal');
+    if (modal) modal.classList.remove('hidden');
+    
+    fetchWhatsAppStatus();
+    whatsappPollInterval = setInterval(fetchWhatsAppStatus, 5000);
+}
+window.showWhatsAppQRModal = showWhatsAppQRModal;
+
+function closeWhatsAppQRModal() {
+    const modal = document.getElementById('whatsapp-qr-modal');
+    if (modal) modal.classList.add('hidden');
+    
+    if (whatsappPollInterval) {
+        clearInterval(whatsappPollInterval);
+        whatsappPollInterval = null;
+    }
+}
+window.closeWhatsAppQRModal = closeWhatsAppQRModal;
+
+async function fetchWhatsAppStatus() {
+    try {
+        const res = await fetch(`${API_URL}/api/admin/whatsapp-status`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json();
+        
+        const desc = document.getElementById('whatsapp-status-desc');
+        const wrapper = document.getElementById('whatsapp-qr-wrapper');
+        const img = document.getElementById('whatsapp-qr-image');
+        const linkBtn = document.getElementById('admin-whatsapp-link-btn');
+
+        if (data.isConnected) {
+            if (desc) desc.textContent = "✓ Connected! The notification bot is active.";
+            if (wrapper) wrapper.classList.add('hidden');
+            if (linkBtn) linkBtn.textContent = "WhatsApp Connected";
+        } else if (data.qr) {
+            if (desc) desc.textContent = "Link your account by scanning this QR code in WhatsApp (Linked Devices):";
+            if (img) img.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(data.qr)}`;
+            if (wrapper) wrapper.classList.remove('hidden');
+            if (linkBtn) linkBtn.textContent = "Link WhatsApp (Scan QR)";
+        } else {
+            if (desc) desc.textContent = "WhatsApp client is starting up or disconnected. Waiting for QR code...";
+            if (wrapper) wrapper.classList.add('hidden');
+            if (linkBtn) linkBtn.textContent = "WhatsApp Disconnected";
+        }
+    } catch (err) {
+        console.error('Failed to load WhatsApp status:', err);
+    }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
     updateAuthVisibility();
     navigate('home');

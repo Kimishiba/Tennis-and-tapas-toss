@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { OAuth2Client } from 'google-auth-library';
-import { initWhatsApp, sendGroupNotification } from './whatsapp.js';
+import { initWhatsApp, sendGroupNotification, getWhatsAppStatus } from './whatsapp.js';
 
 const googleClient = new OAuth2Client();
 
@@ -1009,6 +1009,15 @@ app.post('/api/admin/clear-database', authenticateToken, requireAdmin, async (re
     await db.run("DELETE FROM players WHERE is_admin = 0");
     await db.run("VACUUM");
     res.json({ message: 'Database cleared successfully. All sessions, signups, matches, and non-admin players have been reset.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Check WhatsApp connection status and retrieve active QR code (Admin only)
+app.get('/api/admin/whatsapp-status', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    res.json(getWhatsAppStatus());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
