@@ -213,6 +213,28 @@ export async function initTelegram(dbInstance, helpers = {}) {
       }
     });
 
+    // Start / Help Commands
+    const helpMessage = `📖 *Tennis & Tapas Toss Bot Commands*:\n\n` +
+      `• /in \\- Check yourself in using your Telegram name\\.\n` +
+      `• /in \\[Name\\], \\[Gender: M/F\\], \\[Level: 1\\-9\\] \\- Check in with custom details \\(e\\.g\\. \`/in Sofia, F, 6\`\\)\\.\n` +
+      `• /generate \\- \\(Admins only\\) Generate pairings for the active session\\.\n` +
+      `• /help \\- Show this guide\\.`;
+
+    bot.start(async (ctx) => {
+      await ctx.replyWithMarkdownV2(helpMessage);
+    });
+
+    bot.help(async (ctx) => {
+      await ctx.replyWithMarkdownV2(helpMessage);
+    });
+
+    // Register commands with Telegram UI menu helper
+    bot.telegram.setMyCommands([
+      { command: 'in', description: 'Check in to play' },
+      { command: 'generate', description: 'Generate pairings (Admins only)' },
+      { command: 'help', description: 'Show available commands' }
+    ]).catch(err => console.error('[Telegram Bot] Failed to register menu commands:', err));
+
     bot.launch();
     isConnected = true;
     console.log('[Telegram Bot] Success: Bot is connected and listening!');
