@@ -251,9 +251,18 @@ async function sendPushNotification(playerIds, payload) {
  * respecting level differences, avoiding partner repeats,
  * encouraging mixed doubles, and maximizing opponent rotation.
  */
-export async function generatePairings(sessionId, roundNumber, approvedPlayers) {
-  if (approvedPlayers.length !== 16) {
-    throw new Error('Pairings require exactly 16 approved players');
+export async function generatePairings(sessionId, roundNumber, approvedPlayers, courtsConfig, rules = {}) {
+  const finalCourtsConfig = courtsConfig || [
+    { courtNumber: "1" },
+    { courtNumber: "2" },
+    { courtNumber: "3" },
+    { courtNumber: "4" }
+  ];
+  const numCourts = finalCourtsConfig.length;
+  const requiredPlayers = numCourts * 4;
+
+  if (approvedPlayers.length < requiredPlayers) {
+    throw new Error(`Pairings require at least ${requiredPlayers} approved players for ${numCourts} courts`);
   }
 
   // Load all historical matches to compute partner & opponent frequencies
@@ -284,6 +293,27 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
     opponentHistory.set(key, (opponentHistory.get(key) || 0) + weight);
   }
 
+  // Track how many matches each player has played TODAY
+  const todayMatchCount = new Map();
+  approvedPlayers.forEach(p => todayMatchCount.set(p.id, 0));
+  for (const m of currentSessionMatches) {
+    [m.player1, m.player2, m.player3, m.player4].forEach(pId => {
+      if (todayMatchCount.has(pId)) {
+        todayMatchCount.set(pId, todayMatchCount.get(pId) + 1);
+      }
+    });
+  }
+
+  // Sort approved players by fewest matches played today, then randomize slightly to break ties
+  const sortedPlayers = [...approvedPlayers].sort((a, b) => {
+    const countDiff = todayMatchCount.get(a.id) - todayMatchCount.get(b.id);
+    if (countDiff !== 0) return countDiff;
+    return Math.random() - 0.5;
+  });
+
+  // Pick the top `requiredPlayers` to play this round
+  const activePlayers = sortedPlayers.slice(0, requiredPlayers);
+
   // Record historical matches (weighted slightly lower or equal)
   for (const m of allMatches) {
     recordPartner(m.player1, m.player2, 1);
@@ -306,23 +336,27 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
     recordOpponent(m.player2, m.player4, 10);
   }
 
+  // Extract custom rules options (default to true if not specified)
+  const balanceLevels = rules.balanceLevels !== false;
+  const preferMixed = rules.preferMixed !== false;
+  const avoidRepeats = rules.avoidRepeats !== false;
+
   // Scoring parameters
-  const PARTNER_REPEATED_PENALTY = 100000; // Massively penalize re-partnering
-  const OPPONENT_REPEATED_PENALTY = 1000;
-  const LEVEL_GAP_PENALTY = 100; // Penalty per level difference in match balance
+  const PARTNER_REPEATED_PENALTY = avoidRepeats ? 100000 : 0; // Massively penalize re-partnering
+  const OPPONENT_REPEATED_PENALTY = avoidRepeats ? 1000 : 0;
+  const LEVEL_GAP_PENALTY = balanceLevels ? 100 : 0; // Penalty per level difference in match balance
   const PARTNER_GAP_IDEAL = 4; // Preferred partner level gap <= 4
-  const PARTNER_GAP_SOFT_PENALTY = 1000; // Penalty for partner gap > 4
+  const PARTNER_GAP_SOFT_PENALTY = balanceLevels ? 1000 : 0; // Penalty for partner gap > 4
   const PARTNER_GAP_HARD_LIMIT = 8; // Max partner gap
-  const PARTNER_GAP_HARD_PENALTY = 500000; // Penalty for partner gap > 8
+  const PARTNER_GAP_HARD_PENALTY = balanceLevels ? 500000 : 0; // Penalty for partner gap > 8
 
   // We will run a randomized search with hill-climbing to find the best configuration
   let bestPairing = null;
   let bestScore = Infinity;
 
-  const players = [...approvedPlayers];
+  const players = [...activePlayers];
 
   // We sample 100,000 permutations to find the optimal pairings.
-  // With 16 players, random sampling works extremely well and finishes in 10-15ms.
   for (let i = 0; i < 100000; i++) {
     // Shuffle players
     for (let j = players.length - 1; j > 0; j--) {
@@ -338,7 +372,7 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
     let score = 0;
     const currentMatches = [];
 
-    for (let c = 0; c < 4; c++) {
+    for (let c = 0; c < numCourts; c++) {
       const offset = c * 4;
       const p1 = players[offset];
       const p2 = players[offset + 1];
@@ -383,26 +417,28 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers) 
       }
 
       // Gender Match Weighting (Prefer Mixed Doubles 2M/2F split)
-      const courtGenders = [p1.gender, p2.gender, p3.gender, p4.gender];
-      const mCount = courtGenders.filter(g => g === 'M').length;
-      const fCount = courtGenders.filter(g => g === 'F').length;
+      if (preferMixed) {
+        const courtGenders = [p1.gender, p2.gender, p3.gender, p4.gender];
+        const mCount = courtGenders.filter(g => g === 'M').length;
+        const fCount = courtGenders.filter(g => g === 'F').length;
 
-      if (mCount === 2 && fCount === 2) {
-        // Ideal case 1: Mixed doubles (1M 1F on both teams)
-        if (p1.gender !== p2.gender && p3.gender !== p4.gender) {
-          score += 0; // Perfect mixed doubles
+        if (mCount === 2 && fCount === 2) {
+          // Ideal case 1: Mixed doubles (1M 1F on both teams)
+          if (p1.gender !== p2.gender && p3.gender !== p4.gender) {
+            score += 0; // Perfect mixed doubles
+          } else {
+            score += 150; // Same-gender teams playing each other (e.g. 2M vs 2F)
+          }
+        } else if (mCount === 4 || fCount === 4) {
+          score += 80; // All men or all women on court (very clean)
         } else {
-          score += 150; // Same-gender teams playing each other (e.g. 2M vs 2F)
+          // 3M 1F or 3F 1M (isolates one player)
+          score += 50000; // Heavily discouraged
         }
-      } else if (mCount === 4 || fCount === 4) {
-        score += 80; // All men or all women on court (very clean)
-      } else {
-        // 3M 1F or 3F 1M (isolates one player)
-        score += 50000; // Heavily discouraged
       }
 
       currentMatches.push({
-        court: c + 1,
+        court: finalCourtsConfig[c].courtNumber,
         player1: p1,
         player2: p2,
         player3: p3,
@@ -966,6 +1002,11 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
 // Generate next draft round (Admin only)
 app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, async (req, res) => {
   const sessionId = req.params.id;
+  const { courtsConfig, rules } = req.body;
+
+  if (!courtsConfig || !Array.isArray(courtsConfig) || courtsConfig.length < 1 || courtsConfig.length > 4) {
+    return res.status(400).json({ error: 'Valid courts configuration required (1 to 4 courts)' });
+  }
 
   try {
     const session = await db.get('SELECT * FROM sessions WHERE id = ?', [sessionId]);
@@ -978,8 +1019,9 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
       WHERE s.session_id = ? AND s.status = 'approved'
     `, [sessionId]);
 
-    if (approvedPlayers.length !== 16) {
-      return res.status(400).json({ error: `Exactly 16 approved players are required. Currently there are ${approvedPlayers.length} approved players.` });
+    const requiredPlayers = courtsConfig.length * 4;
+    if (approvedPlayers.length < requiredPlayers) {
+      return res.status(400).json({ error: `At least ${requiredPlayers} approved players are required for ${courtsConfig.length} courts. Currently there are ${approvedPlayers.length} approved players.` });
     }
 
     // Determine the next round number
@@ -987,7 +1029,7 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
     const nextRoundNumber = (lastMatch?.max_round || 0) + 1;
 
     // Generate optimal pairings
-    const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers);
+    const pairings = await generatePairings(sessionId, nextRoundNumber, approvedPlayers, courtsConfig, rules);
 
     const nameMap = await getDifferentiatedNamesMap();
     pairings.forEach(m => {
@@ -1008,11 +1050,31 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
   const sessionId = req.params.id;
   const { round_number, pairings } = req.body;
 
-  if (!round_number || !pairings || pairings.length !== 4) {
-    return res.status(400).json({ error: 'Valid round number and 4 match pairings are required' });
+  if (!round_number || !pairings || pairings.length < 1 || pairings.length > 4) {
+    return res.status(400).json({ error: 'Valid round number and 1 to 4 match pairings are required' });
   }
 
   try {
+    // Validate that all players submitted in the pairings are actually approved for this session
+    const approvedPlayers = await db.all(`SELECT player_id FROM signups WHERE session_id = ? AND status = 'approved'`, [sessionId]);
+    const validPlayerIds = new Set(approvedPlayers.map(p => p.player_id));
+
+    const allParticipantIds = [];
+    for (const match of pairings) {
+      for (const p of [match.player1, match.player2, match.player3, match.player4]) {
+        if (!validPlayerIds.has(p.id)) {
+          return res.status(400).json({ error: `Player ID ${p.id} (${p.name || ''}) is not approved for this session.` });
+        }
+        allParticipantIds.push(p.id);
+      }
+    }
+
+    // Check for duplicates
+    const uniqueParticipantIds = new Set(allParticipantIds);
+    if (uniqueParticipantIds.size !== allParticipantIds.length) {
+      return res.status(400).json({ error: 'Duplicate players detected. The same player cannot be assigned to more than one match in the same round.' });
+    }
+
     // Start database transaction
     await db.run('BEGIN TRANSACTION');
 
@@ -1023,7 +1085,6 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
     await db.run('DELETE FROM matches WHERE session_id = ? AND round_number = ?', [sessionId, round_number]);
 
     // Insert new matches
-    const allParticipantIds = [];
     for (const match of pairings) {
       await db.run(`
         INSERT INTO matches (session_id, round_number, court, player1, player2, player3, player4)
@@ -1037,13 +1098,11 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
         match.player3.id,
         match.player4.id
       ]);
-      allParticipantIds.push(match.player1.id, match.player2.id, match.player3.id, match.player4.id);
     }
 
     await db.run('COMMIT');
 
-    // Trigger Web Push Notifications in background
-    // We send to all 16 players telling them their court and partners
+    // We send to all players telling them their court and partners
     const nameMap = await getDifferentiatedNamesMap();
     for (const match of pairings) {
       const matchPlayers = [match.player1, match.player2, match.player3, match.player4];
@@ -1079,6 +1138,17 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
       console.error('Error constructing WhatsApp group notification:', waErr);
     }
 
+    // Send notifications to resting players
+    const restingPlayerIds = approvedPlayers.map(p => p.player_id).filter(id => !uniqueParticipantIds.has(id));
+    if (restingPlayerIds.length > 0) {
+      const restingPayload = {
+        title: `Round ${round_number} Status`,
+        body: "You're not playing this round, enjoy some social time!",
+        url: '/'
+      };
+      await sendPushNotification(restingPlayerIds, restingPayload);
+    }
+
     res.json({ message: `Round ${round_number} published successfully and notifications sent` });
   } catch (err) {
     await db.run('ROLLBACK');
@@ -1086,8 +1156,8 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
   }
 });
 
-// Update match scores (Admin only)
-app.put('/api/matches/:id/score', authenticateToken, requireAdmin, async (req, res) => {
+// Update match scores (Admin or Player in the match)
+app.put('/api/matches/:id/score', authenticateToken, async (req, res) => {
   const matchId = req.params.id;
   const { team_a_score, team_b_score } = req.body;
 
@@ -1096,6 +1166,14 @@ app.put('/api/matches/:id/score', authenticateToken, requireAdmin, async (req, r
   }
 
   try {
+    const match = await db.get('SELECT * FROM matches WHERE id = ?', [matchId]);
+    if (!match) return res.status(404).json({ error: 'Match not found' });
+
+    const isPlayerInMatch = [match.player1, match.player2, match.player3, match.player4].includes(req.user.id);
+    if (!req.user.is_admin && !isPlayerInMatch) {
+      return res.status(403).json({ error: 'You are not authorized to update this match score.' });
+    }
+
     await db.run(
       'UPDATE matches SET team_a_score = ?, team_b_score = ? WHERE id = ?',
       [team_a_score, team_b_score, matchId]
@@ -1106,11 +1184,142 @@ app.put('/api/matches/:id/score', authenticateToken, requireAdmin, async (req, r
   }
 });
 
+// Get all registered players (Admin only)
+app.get('/api/admin/players', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const players = await db.all('SELECT id, name, username as email, gender, level, picture_path FROM players WHERE is_admin = 0 ORDER BY name ASC');
+    res.json({ players });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get player-specific insights and partnership stats (Authenticated user)
+app.get('/api/players/me/insights', authenticateToken, async (req, res) => {
+  const playerId = req.user.id;
+  try {
+    const matches = await db.all(`
+      SELECT m.*, 
+        p1.name as p1_name, p2.name as p2_name, p3.name as p3_name, p4.name as p4_name
+      FROM matches m
+      JOIN players p1 ON m.player1 = p1.id
+      JOIN players p2 ON m.player2 = p2.id
+      JOIN players p3 ON m.player3 = p3.id
+      JOIN players p4 ON m.player4 = p4.id
+      WHERE m.team_a_score IS NOT NULL AND m.team_b_score IS NOT NULL
+        AND (m.player1 = ? OR m.player2 = ? OR m.player3 = ? OR m.player4 = ?)
+      ORDER BY m.session_id ASC, m.round_number ASC
+    `, [playerId, playerId, playerId, playerId]);
+
+    const partners = {}; // partnerId -> { name, played, wins }
+    const opponents = {}; // opponentId -> { name, played, wins_against }
+    let currentStreak = 0;
+    let maxStreak = 0;
+
+    matches.forEach(m => {
+      let isTeamA = (m.player1 === playerId || m.player2 === playerId);
+      let won = false;
+      if (isTeamA) {
+        won = m.team_a_score > m.team_b_score;
+      } else {
+        won = m.team_b_score > m.team_a_score;
+      }
+
+      if (won) {
+        currentStreak++;
+        if (currentStreak > maxStreak) maxStreak = currentStreak;
+      } else {
+        currentStreak = 0;
+      }
+
+      // Partner
+      let partnerId, partnerName;
+      if (m.player1 === playerId) { partnerId = m.player2; partnerName = m.p2_name; }
+      else if (m.player2 === playerId) { partnerId = m.player1; partnerName = m.p1_name; }
+      else if (m.player3 === playerId) { partnerId = m.player4; partnerName = m.p4_name; }
+      else { partnerId = m.player3; partnerName = m.p3_name; }
+
+      if (!partners[partnerId]) {
+        partners[partnerId] = { name: partnerName, played: 0, wins: 0 };
+      }
+      partners[partnerId].played++;
+      if (won) partners[partnerId].wins++;
+
+      // Opponents
+      let ops = [];
+      if (isTeamA) {
+        ops = [{ id: m.player3, name: m.p3_name }, { id: m.player4, name: m.p4_name }];
+      } else {
+        ops = [{ id: m.player1, name: m.p1_name }, { id: m.player2, name: m.p2_name }];
+      }
+
+      ops.forEach(op => {
+        if (!opponents[op.id]) {
+          opponents[op.id] = { name: op.name, played: 0, wins_against: 0 };
+        }
+        opponents[op.id].played++;
+        if (won) opponents[op.id].wins_against++;
+      });
+    });
+
+    // Best Partner: partner with highest win rate (min 1 match, break ties by most played, then wins)
+    let bestPartner = null;
+    let bestPartnerWinRate = -1;
+    for (const pid in partners) {
+      const p = partners[pid];
+      const winRate = p.wins / p.played;
+      if (winRate > bestPartnerWinRate || (winRate === bestPartnerWinRate && p.played > (bestPartner?.played || 0))) {
+        bestPartnerWinRate = winRate;
+        bestPartner = { name: p.name, winRate: Math.round(winRate * 100), played: p.played, wins: p.wins };
+      }
+    }
+
+    // Toughest Rival: opponent with lowest win rate against them (meaning we lost most to them)
+    let toughestRival = null;
+    let toughestRivalWinRate = 2; // high number
+    for (const oid in opponents) {
+      const op = opponents[oid];
+      const winRate = op.wins_against / op.played;
+      if (winRate < toughestRivalWinRate || (winRate === toughestRivalWinRate && op.played > (toughestRival?.played || 0))) {
+        toughestRivalWinRate = winRate;
+        toughestRival = { name: op.name, winRateAgainst: Math.round(winRate * 100), played: op.played, losses: op.played - op.wins_against };
+      }
+    }
+
+    // Dynamic Achievements
+    const badges = [];
+    if (matches.length > 0) badges.push("Toss Enthusiast 🎾");
+    if (matches.length >= 5) badges.push("Toss Regular 🏆");
+    const totalWins = matches.filter(m => {
+      let isTeamA = (m.player1 === playerId || m.player2 === playerId);
+      return isTeamA ? m.team_a_score > m.team_b_score : m.team_b_score > m.team_a_score;
+    }).length;
+    if (totalWins > 0) badges.push("Winner's Circle 🥇");
+    if (maxStreak >= 3) badges.push("On Fire 🔥");
+    const totalWinRate = matches.length > 0 ? (totalWins / matches.length) : 0;
+    if (matches.length >= 3 && totalWinRate >= 0.6) badges.push("Elite Competitor ⚡");
+
+    res.json({
+      totalPlayed: matches.length,
+      totalWins,
+      currentStreak,
+      maxStreak,
+      bestPartner,
+      toughestRival,
+      badges
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Leaderboard & Stats Endpoints ---
 
 // Get Leaderboard (History-based)
 app.get('/api/leaderboard', authenticateToken, async (req, res) => {
   try {
+    const { type } = req.query; // 'today' or 'overall'
+
     // Fetch all players
     const players = await db.all('SELECT id, name, gender, level, picture_path FROM players WHERE is_admin = 0');
     
@@ -1120,13 +1329,26 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
         p.name = nameMap.get(p.id);
       }
     }
-    
-    // Fetch all completed matches with scores
-    const matches = await db.all(`
+
+    let matchesQuery = `
       SELECT player1, player2, player3, player4, team_a_score, team_b_score
       FROM matches 
       WHERE team_a_score IS NOT NULL AND team_b_score IS NOT NULL
-    `);
+    `;
+    const queryParams = [];
+
+    if (type === 'today') {
+      const currentSession = await db.get("SELECT id FROM sessions ORDER BY id DESC LIMIT 1");
+      if (currentSession) {
+        matchesQuery += ` AND session_id = ?`;
+        queryParams.push(currentSession.id);
+      } else {
+        return res.json({ leaderboard: [] });
+      }
+    }
+
+    // Fetch completed matches with scores
+    const matches = await db.all(matchesQuery, queryParams);
 
     // Calculate statistics
     const statsMap = new Map();
@@ -1170,7 +1392,7 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
       }
     }
 
-    const leaderboard = Array.from(statsMap.values()).map(p => {
+    let leaderboard = Array.from(statsMap.values()).map(p => {
       const diff = p.pointsWon - p.pointsLost;
       const winRate = p.played > 0 ? Math.round((p.wins / p.played) * 100) : 0;
       return {
@@ -1179,6 +1401,10 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
         winRate
       };
     });
+
+    if (type === 'today') {
+      leaderboard = leaderboard.filter(p => p.played > 0);
+    }
 
     // Sort by wins desc, diff desc, pointsWon desc
     leaderboard.sort((a, b) => {

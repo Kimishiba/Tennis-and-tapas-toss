@@ -7,6 +7,7 @@ let authMode = 'register'; // register, login
 let activeDashboardTab = 'match'; // match, rankings
 let googleAuthToken = null; // Stored if Google signin succeeds but registration is incomplete
 let draftPairings = null; // Store locally generated draft matches
+let isEditingPublishedRound = false; // Flag to track if admin is modifying already published pairings
 
 const API_URL = ''; // Local backend URLs are relative
 
@@ -220,10 +221,16 @@ function updateAuthVisibility() {
         document.querySelectorAll('.anon-only').forEach(el => el.classList.add('hidden'));
         document.getElementById('profile-btn').classList.remove('hidden');
 
+        const dbLabel = document.getElementById('nav-btn-dashboard-label');
+        const dbIcon = document.getElementById('nav-btn-dashboard-icon');
         if (currentUser.is_admin) {
             document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+            if (dbLabel) dbLabel.textContent = 'DASHBOARD';
+            if (dbIcon) dbIcon.textContent = 'dashboard';
         } else {
             document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+            if (dbLabel) dbLabel.textContent = 'PROFILE';
+            if (dbIcon) dbIcon.textContent = 'person';
         }
     } else {
         document.querySelectorAll('.auth-required').forEach(el => el.classList.add('hidden'));
@@ -363,6 +370,9 @@ function loadProfileData() {
 
     // Load push state
     checkPushSubscriptionState();
+
+    // Load dynamic partner/rival stats and badges
+    loadProfileInsights();
 }
 
 async function handleProfileUpdate(e) {
@@ -422,21 +432,34 @@ function setDashboardTab(tab) {
     activeDashboardTab = tab;
     const matchBtn = document.getElementById('toggle-dashboard-match');
     const rankingsBtn = document.getElementById('toggle-dashboard-rankings');
+    const playersBtn = document.getElementById('toggle-dashboard-players');
+    
     const matchView = document.getElementById('dashboard-tab-match');
     const rankingsView = document.getElementById('dashboard-tab-rankings');
+    const playersView = document.getElementById('dashboard-tab-players');
+
+    // Hide all
+    if (matchView) matchView.classList.add('hidden');
+    if (rankingsView) rankingsView.classList.add('hidden');
+    if (playersView) playersView.classList.add('hidden');
+
+    // Reset button states
+    if (matchBtn) matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm";
+    if (rankingsBtn) rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm";
+    if (playersBtn) playersBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background text-xs sm:text-sm admin-only";
 
     if (tab === 'match') {
-        matchView.classList.remove('hidden');
-        rankingsView.classList.add('hidden');
-        matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container";
-        rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background";
+        if (matchView) matchView.classList.remove('hidden');
+        if (matchBtn) matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm";
         loadDashboardData();
-    } else {
-        rankingsView.classList.remove('hidden');
-        matchView.classList.add('hidden');
-        rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container";
-        matchBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-background text-on-background";
+    } else if (tab === 'rankings') {
+        if (rankingsView) rankingsView.classList.remove('hidden');
+        if (rankingsBtn) rankingsBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm";
         loadLeaderboardData();
+    } else if (tab === 'players') {
+        if (playersView) playersView.classList.remove('hidden');
+        if (playersBtn) playersBtn.className = "flex-1 p-3 font-label-bold text-label-bold uppercase bg-primary-container text-on-primary-container text-xs sm:text-sm admin-only";
+        loadAdminPlayersData();
     }
 }
 
@@ -449,6 +472,7 @@ async function loadDashboardData() {
         
         if (data.session) {
             activeSession = data.session;
+            activeSession.matches = data.matches || [];
             document.getElementById('session-date-banner').textContent = data.session.date;
             const checkins = data.signups ? data.signups.length : 0;
             document.getElementById('session-checkins-banner').textContent = checkins;
@@ -528,26 +552,63 @@ async function togglePlayerApproval(playerId, status) {
     }
 }
 
+function saveRulePreferences() {
+    const balanceLevels = document.getElementById('rule-balance-levels')?.checked !== false;
+    const preferMixed = document.getElementById('rule-prefer-mixed')?.checked !== false;
+    const avoidRepeats = document.getElementById('rule-avoid-repeats')?.checked !== false;
+    
+    localStorage.setItem('rule_balance_levels', balanceLevels);
+    localStorage.setItem('rule_prefer_mixed', preferMixed);
+    localStorage.setItem('rule_avoid_repeats', avoidRepeats);
+}
+
+function loadRulePreferences() {
+    const balanceLevels = localStorage.getItem('rule_balance_levels') !== 'false';
+    const preferMixed = localStorage.getItem('rule_prefer_mixed') !== 'false';
+    const avoidRepeats = localStorage.getItem('rule_avoid_repeats') !== 'false';
+
+    const checkBalance = document.getElementById('rule-balance-levels');
+    const checkMixed = document.getElementById('rule-prefer-mixed');
+    const checkRepeats = document.getElementById('rule-avoid-repeats');
+
+    if (checkBalance) checkBalance.checked = balanceLevels;
+    if (checkMixed) checkMixed.checked = preferMixed;
+    if (checkRepeats) checkRepeats.checked = avoidRepeats;
+}
+
+let currentAdminSignups = [];
+
 function populateAdminPairingControls(signups) {
-    const approvedCount = signups ? signups.filter(s => s.status === 'approved').length : 0;
+    currentAdminSignups = signups || [];
     const adminPanel = document.getElementById('admin-pairing-panel');
     const completeContainer = document.getElementById('admin-complete-session-container');
-    const generateBtn = document.getElementById('admin-generate-btn');
-    const statusEl = document.getElementById('admin-pairing-status');
 
     if (adminPanel) adminPanel.classList.remove('hidden');
     if (completeContainer) completeContainer.classList.remove('hidden');
+    
+    loadRulePreferences();
+    validateAdminGeneration();
+}
 
-    if (approvedCount === 16) {
+function validateAdminGeneration() {
+    const approvedCount = currentAdminSignups.filter(s => s.status === 'approved').length;
+    const numCourtsSelect = document.getElementById('num-courts-select');
+    const numCourts = numCourtsSelect ? parseInt(numCourtsSelect.value, 10) : 4;
+    const requiredPlayers = numCourts * 4;
+
+    const generateBtn = document.getElementById('admin-generate-btn');
+    const statusEl = document.getElementById('admin-pairing-status');
+
+    if (approvedCount >= requiredPlayers) {
         if (generateBtn) generateBtn.disabled = false;
         if (statusEl) {
-            statusEl.textContent = "Roster is complete! Ready to generate pairings.";
+            statusEl.textContent = `Roster has ${approvedCount} approved players. Ready to generate pairings for ${numCourts} courts!`;
             statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-green-700";
         }
     } else {
         if (generateBtn) generateBtn.disabled = true;
         if (statusEl) {
-            statusEl.textContent = `Pairings require exactly 16 approved players (currently ${approvedCount} approved).`;
+            statusEl.textContent = `Need at least ${requiredPlayers} approved players for ${numCourts} courts (currently ${approvedCount} approved).`;
             statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-red-700";
         }
     }
@@ -633,19 +694,56 @@ async function createNewSession() {
     }
 }
 
+// Dynamically generate court label inputs based on the selected number of courts
+function updateCourtInputs() {
+    const numCourts = parseInt(document.getElementById('num-courts-select').value, 10);
+    const container = document.getElementById('court-labels-container');
+    container.innerHTML = '';
+    for (let i = 1; i <= numCourts; i++) {
+        container.innerHTML += `
+            <div class="flex flex-col gap-2">
+                <label class="font-label-bold text-label-sm uppercase text-outline">Court ${i} Label</label>
+                <input type="text" id="court-label-${i}" value="${i}" class="bg-white border-2 border-on-background p-3 font-body-md focus:ring-4 focus:ring-primary-container outline-none transition-all">
+            </div>
+        `;
+    }
+    validateAdminGeneration();
+}
+
 // Generate round draft matches (hill-climbing logic client-side preview)
 async function generateRoundDraft() {
     if (!activeSession) return;
     try {
+        const numCourts = parseInt(document.getElementById('num-courts-select').value, 10);
+        const courtsConfig = [];
+        for (let i = 1; i <= numCourts; i++) {
+            const val = document.getElementById(`court-label-${i}`)?.value || `${i}`;
+            courtsConfig.push({ courtNumber: val });
+        }
+
+        const rules = {
+            balanceLevels: document.getElementById('rule-balance-levels')?.checked !== false,
+            preferMixed: document.getElementById('rule-prefer-mixed')?.checked !== false,
+            avoidRepeats: document.getElementById('rule-avoid-repeats')?.checked !== false
+        };
+
         const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/generate-round`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ courtsConfig, rules })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
         draftPairings = data.pairings;
         document.getElementById('admin-publish-btn').classList.remove('hidden');
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        const pubBottomContainer = document.getElementById('admin-publish-bottom-container');
+        if (pubBtnBottom) pubBtnBottom.classList.remove('hidden');
+        if (pubBottomContainer) pubBottomContainer.classList.remove('hidden');
 
         // Preview draft in pairings section
         document.getElementById('matches-section-title').textContent = `Active Pairings (Previewing Round ${data.round_number})`;
@@ -654,14 +752,106 @@ async function generateRoundDraft() {
             is_draft: true,
             round_number: data.round_number
         })));
+        validateDraftDuplicates();
     } catch (err) {
         alert(err.message);
+    }
+}
+
+// Update the global draftPairings state when an admin manually changes a player in the dropdown
+function updateDraftPlayer(matchIndex, playerKey, selectElement) {
+    if (!draftPairings || !draftPairings[matchIndex]) return;
+    const newPlayerId = parseInt(selectElement.value, 10);
+    const newPlayerName = selectElement.options[selectElement.selectedIndex].text;
+    
+    // Update the specific player object in the draft
+    draftPairings[matchIndex][playerKey] = {
+        id: newPlayerId,
+        name: newPlayerName
+    };
+
+    validateDraftDuplicates();
+}
+
+// Check if any player is assigned to multiple matches in the current draft/edit round
+function validateDraftDuplicates() {
+    if (!draftPairings) return true;
+    
+    const selects = document.querySelectorAll('#courts-match-grid select');
+    selects.forEach(sel => {
+        sel.classList.remove('border-red-500', 'text-red-700', 'bg-red-50');
+    });
+
+    const statusText = document.getElementById('admin-pairing-status');
+    if (statusText) {
+        statusText.textContent = '';
+        statusText.classList.add('hidden');
+    }
+
+    const seenIds = new Set();
+    const duplicateIds = new Set();
+    
+    draftPairings.forEach(m => {
+        ['player1', 'player2', 'player3', 'player4'].forEach(key => {
+            const pid = m[key]?.id;
+            if (pid) {
+                if (seenIds.has(pid)) {
+                    duplicateIds.add(pid);
+                }
+                seenIds.add(pid);
+            }
+        });
+    });
+
+    if (duplicateIds.size > 0) {
+        selects.forEach(sel => {
+            const val = parseInt(sel.value, 10);
+            if (duplicateIds.has(val)) {
+                sel.classList.add('border-red-500', 'text-red-700', 'bg-red-50');
+            }
+        });
+        
+        const dupNames = [];
+        duplicateIds.forEach(id => {
+            const player = currentAdminSignups.find(s => s.player_id === id);
+            if (player) dupNames.push(player.name || player.player_name);
+        });
+
+        const errorMsg = `Warning: Duplicate players planned for this round: ${dupNames.join(', ')}. Please resolve before publishing/saving.`;
+        
+        if (statusText) {
+            statusText.textContent = errorMsg;
+            statusText.classList.remove('hidden');
+        }
+
+        const pubBtn = document.getElementById('admin-publish-btn');
+        if (pubBtn) pubBtn.disabled = true;
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        if (pubBtnBottom) pubBtnBottom.disabled = true;
+        const saveBtn = document.getElementById('admin-save-pairings-btn');
+        if (saveBtn) saveBtn.disabled = true;
+
+        return false;
+    } else {
+        const pubBtn = document.getElementById('admin-publish-btn');
+        if (pubBtn) pubBtn.disabled = false;
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        if (pubBtnBottom) pubBtnBottom.disabled = false;
+        const saveBtn = document.getElementById('admin-save-pairings-btn');
+        if (saveBtn) saveBtn.disabled = false;
+        
+        return true;
     }
 }
 
 async function publishActiveRound() {
     if (!activeSession || !draftPairings) return;
     
+    if (!validateDraftDuplicates()) {
+        alert('Please resolve duplicate players before publishing.');
+        return;
+    }
+
     // Get round number
     const maxRoundRes = await fetch(`${API_URL}/api/sessions/current`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -685,6 +875,10 @@ async function publishActiveRound() {
         alert(`Round ${nextRound} published and notifications sent!`);
         draftPairings = null;
         document.getElementById('admin-publish-btn').classList.add('hidden');
+        const pubBtnBottom = document.getElementById('admin-publish-btn-bottom');
+        const pubBottomContainer = document.getElementById('admin-publish-bottom-container');
+        if (pubBtnBottom) pubBtnBottom.classList.add('hidden');
+        if (pubBottomContainer) pubBottomContainer.classList.add('hidden');
         loadDashboardData();
     } catch (err) {
         alert(err.message);
@@ -714,6 +908,30 @@ function populateActiveMatches(matches) {
     const grid = document.getElementById('courts-match-grid');
     grid.innerHTML = '';
 
+    // Update admin edit controls visibility
+    const editControls = document.getElementById('admin-match-edit-controls');
+    if (currentUser && currentUser.is_admin && matches && matches.length > 0) {
+        const hasDraft = matches.some(m => m.is_draft);
+        if (hasDraft) {
+            if (editControls) editControls.classList.add('hidden');
+        } else {
+            if (editControls) {
+                editControls.classList.remove('hidden');
+                if (isEditingPublishedRound) {
+                    document.getElementById('admin-edit-pairings-btn').classList.add('hidden');
+                    document.getElementById('admin-save-pairings-btn').classList.remove('hidden');
+                    document.getElementById('admin-cancel-pairings-btn').classList.remove('hidden');
+                } else {
+                    document.getElementById('admin-edit-pairings-btn').classList.remove('hidden');
+                    document.getElementById('admin-save-pairings-btn').classList.add('hidden');
+                    document.getElementById('admin-cancel-pairings-btn').classList.add('hidden');
+                }
+            }
+        }
+    } else {
+        if (editControls) editControls.classList.add('hidden');
+    }
+
     if (!matches || matches.length === 0) {
         grid.innerHTML = `
             <div class="col-span-2 text-center p-8 bg-white border-2 border-on-background">
@@ -726,10 +944,38 @@ function populateActiveMatches(matches) {
     const maxRound = Math.max(...matches.map(m => m.round_number));
     document.getElementById('matches-section-title').textContent = `Active Pairings (Round ${maxRound})`;
 
-    // Filter to show matches from the latest active round (or draft)
-    const latestMatches = matches.filter(m => m.round_number === maxRound);
+    // Helper to generate a dropdown if in draft/edit mode
+    function renderPlayer(pName, pObj, mIndex, pKey, isDraft) {
+        if (!isDraft) return `<p class="font-body-lg font-bold uppercase">${pName}</p>`;
+        
+        const approvedPlayers = currentAdminSignups.filter(s => s.status === 'approved');
+        let options = approvedPlayers.map(p => {
+            const isSelected = p.player_id === pObj.id ? 'selected' : '';
+            return `<option value="${p.player_id}" ${isSelected}>${p.player_name || p.name}</option>`;
+        }).join('');
+        
+        return `
+            <select class="bg-white border-2 border-on-background p-1 font-body-md uppercase max-w-[140px]"
+                    onchange="updateDraftPlayer(${mIndex}, '${pKey}', this)">
+                ${options}
+            </select>
+        `;
+    }
 
-    latestMatches.forEach(m => {
+    // If we are editing, we display draftPairings instead of the published matches
+    let displayMatches = matches;
+    if (isEditingPublishedRound && draftPairings) {
+        displayMatches = draftPairings.map(p => ({
+            ...p,
+            is_draft: true,
+            round_number: maxRound
+        }));
+    }
+
+    // Filter to show matches from the latest active round (or draft)
+    const latestMatches = displayMatches.filter(m => m.round_number === maxRound);
+
+    latestMatches.forEach((m, mIndex) => {
         const card = document.createElement('div');
         card.className = "border-2 border-on-background p-6 brutalist-shadow bg-white flex flex-col gap-4 relative";
 
@@ -739,6 +985,14 @@ function populateActiveMatches(matches) {
         const p4_name = m.player4.name || m.p4_name;
 
         const isDraft = m.is_draft || false;
+
+        const p1Id = m.player1.id !== undefined ? m.player1.id : m.player1;
+        const p2Id = m.player2.id !== undefined ? m.player2.id : m.player2;
+        const p3Id = m.player3.id !== undefined ? m.player3.id : m.player3;
+        const p4Id = m.player4.id !== undefined ? m.player4.id : m.player4;
+        const isPlayerInMatch = currentUser && [p1Id, p2Id, p3Id, p4Id].includes(currentUser.id);
+        const isScored = m.team_a_score !== null && m.team_b_score !== null && m.team_a_score !== undefined && m.team_b_score !== undefined;
+        const canUserScore = currentUser && !isDraft && (currentUser.is_admin || (isPlayerInMatch && !isScored));
 
         card.innerHTML = `
             <div class="flex justify-between items-center border-b-2 border-on-background pb-3">
@@ -750,37 +1004,102 @@ function populateActiveMatches(matches) {
             
             <div class="flex justify-between items-center">
                 <div class="space-y-1">
-                    <p class="font-body-lg font-bold uppercase">${p1_name}</p>
-                    <p class="font-body-lg font-bold uppercase">${p2_name}</p>
+                    ${renderPlayer(p1_name, m.player1, mIndex, 'player1', isDraft)}
+                    ${renderPlayer(p2_name, m.player2, mIndex, 'player2', isDraft)}
                 </div>
                 <div class="text-center font-display-xl text-3xl px-4 text-outline">VS</div>
-                <div class="space-y-1 text-right">
-                    <p class="font-body-lg font-bold uppercase">${p3_name}</p>
-                    <p class="font-body-lg font-bold uppercase">${p4_name}</p>
+                <div class="space-y-1 text-right flex flex-col items-end">
+                    ${renderPlayer(p3_name, m.player3, mIndex, 'player3', isDraft)}
+                    ${renderPlayer(p4_name, m.player4, mIndex, 'player4', isDraft)}
                 </div>
             </div>
 
             <!-- Score panel -->
             <div class="border-t-2 border-dashed border-outline-variant pt-4 flex justify-between items-center">
                 <span class="font-label-bold text-label-bold uppercase">Scores:</span>
-                ${currentUser && currentUser.is_admin && !isDraft ? `
+                ${canUserScore ? `
                     <div class="flex items-center gap-2">
-                        <input type="number" id="score-a-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_a_score || 0}">
+                        <input type="number" id="score-a-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_a_score !== null ? m.team_a_score : 0}">
                         <span class="font-bold">:</span>
-                        <input type="number" id="score-b-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_b_score || 0}">
+                        <input type="number" id="score-b-${m.id}" class="w-12 p-1 border-2 border-on-background text-center font-bold" value="${m.team_b_score !== null ? m.team_b_score : 0}">
                         <button class="bg-primary-container border-2 border-on-background p-1 active-press" onclick="saveMatchScore(${m.id})">
                             <span class="material-symbols-outlined text-sm">save</span>
                         </button>
                     </div>
                 ` : `
                     <div class="font-headline-md font-bold text-on-secondary-container">
-                        ${m.team_a_score !== null && m.team_b_score !== null ? `${m.team_a_score} : ${m.team_b_score}` : 'Pending Play'}
+                        ${isScored ? `${m.team_a_score} : ${m.team_b_score}` : 'Pending Play'}
                     </div>
                 `}
             </div>
         `;
         grid.appendChild(card);
     });
+}
+
+// Post-publish pairings edit mode functions
+function startEditingPairings() {
+    if (!activeSession || !activeSession.matches || activeSession.matches.length === 0) return;
+    
+    const maxRound = Math.max(...activeSession.matches.map(m => m.round_number));
+    const latestMatches = activeSession.matches.filter(m => m.round_number === maxRound);
+    
+    // Check if any of these matches have scores
+    const hasScores = latestMatches.some(m => m.team_a_score !== null || m.team_b_score !== null);
+    if (hasScores) {
+        if (!confirm('Warning: Matches in this round already have scores recorded. Modifying pairings will reset these scores. Do you want to continue?')) {
+            return;
+        }
+    }
+    
+    draftPairings = latestMatches.map(m => ({
+        court: m.court,
+        player1: { id: m.player1, name: m.p1_name },
+        player2: { id: m.player2, name: m.p2_name },
+        player3: { id: m.player3, name: m.p3_name },
+        player4: { id: m.player4, name: m.p4_name }
+    }));
+    
+    isEditingPublishedRound = true;
+    
+    populateActiveMatches(activeSession.matches);
+    validateDraftDuplicates();
+}
+
+function cancelEditingPairings() {
+    isEditingPublishedRound = false;
+    draftPairings = null;
+    loadDashboardData();
+}
+
+async function saveEditedPairings() {
+    if (!activeSession || !draftPairings) return;
+    if (!validateDraftDuplicates()) {
+        alert('Please resolve duplicate players before saving.');
+        return;
+    }
+    
+    const maxRound = Math.max(...activeSession.matches.map(m => m.round_number));
+    
+    try {
+        const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/publish-round`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ round_number: maxRound, pairings: draftPairings })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        alert(`Round ${maxRound} pairings updated successfully!`);
+        isEditingPublishedRound = false;
+        draftPairings = null;
+        loadDashboardData();
+    } catch (err) {
+        alert(err.message);
+    }
 }
 
 async function saveMatchScore(matchId) {
@@ -809,7 +1128,10 @@ async function saveMatchScore(matchId) {
 // Load Leaderboard list
 async function loadLeaderboardData() {
     try {
-        const res = await fetch(`${API_URL}/api/leaderboard`, {
+        const scopeSelect = document.getElementById('leaderboard-scope-select');
+        const scope = scopeSelect ? scopeSelect.value : 'overall';
+
+        const res = await fetch(`${API_URL}/api/leaderboard?type=${scope}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
@@ -980,11 +1302,232 @@ function urlB64ToUint8Array(base64String) {
 }
 
 // ==========================================
+// 6b. COMMUNITY PACK FEATURES
+// ==========================================
+let allPlayersData = [];
+
+async function loadAdminPlayersData() {
+    try {
+        const res = await fetch(`${API_URL}/api/admin/players`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        allPlayersData = data.players || [];
+
+        const container = document.getElementById('admin-players-rows-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (allPlayersData.length === 0) {
+            container.innerHTML = `<tr><td colspan="4" class="p-4 text-center font-bold uppercase">No players found</td></tr>`;
+            return;
+        }
+
+        allPlayersData.forEach(p => {
+            const tr = document.createElement('tr');
+            tr.className = "border-b border-outline-variant hover:bg-surface-container-low transition-colors";
+
+            const avatarHtml = p.picture_path 
+                ? `<img class="w-8 h-8 rounded-full object-cover inline-block mr-2 border border-on-background" src="${p.picture_path}">`
+                : `<span class="material-symbols-outlined text-xl inline-block mr-2 opacity-50">account_circle</span>`;
+
+            tr.innerHTML = `
+                <td class="p-4 flex items-center font-headline-md text-sm uppercase">${avatarHtml} ${p.name}</td>
+                <td class="p-4 font-body-md">${p.email}</td>
+                <td class="p-4 uppercase">${p.gender}</td>
+                <td class="p-4 uppercase">Level ${p.level}</td>
+            `;
+            container.appendChild(tr);
+        });
+    } catch (err) {
+        console.error('Failed to load admin players list:', err.message);
+    }
+}
+window.loadAdminPlayersData = loadAdminPlayersData;
+
+function exportPlayersCSV() {
+    if (!allPlayersData || allPlayersData.length === 0) {
+        alert("No players data to export.");
+        return;
+    }
+
+    // Define header
+    const headers = ['Name', 'Email', 'Gender', 'Level'];
+    const rows = allPlayersData.map(p => [
+        p.name,
+        p.email,
+        p.gender,
+        `Level ${p.level}`
+    ]);
+
+    // Build CSV content
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `players_directory_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+window.exportPlayersCSV = exportPlayersCSV;
+
+function showQRCodeModal() {
+    const modal = document.getElementById('qr-modal');
+    const img = document.getElementById('qr-image');
+    if (modal && img) {
+        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(window.location.origin)}`;
+        modal.classList.remove('hidden');
+    }
+}
+window.showQRCodeModal = showQRCodeModal;
+
+function closeQRCodeModal() {
+    const modal = document.getElementById('qr-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+window.closeQRCodeModal = closeQRCodeModal;
+
+async function loadProfileInsights() {
+    try {
+        const res = await fetch(`${API_URL}/api/players/me/insights`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        const container = document.getElementById('profile-insights-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        // Win streak element
+        const streakHtml = `
+            <div class="border-2 border-on-background p-4 brutalist-shadow bg-surface-container-lowest flex flex-col gap-2">
+                <h4 class="font-headline-sm text-headline-sm uppercase text-primary">Win Streaks</h4>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="border-2 border-on-background p-3 bg-white text-center">
+                        <div class="font-label-bold text-xs uppercase opacity-75">Current Streak</div>
+                        <div class="font-headline-lg text-3xl font-black">${data.currentStreak || 0} 🔥</div>
+                    </div>
+                    <div class="border-2 border-on-background p-3 bg-white text-center">
+                        <div class="font-label-bold text-xs uppercase opacity-75">Max Streak</div>
+                        <div class="font-headline-lg text-3xl font-black">${data.maxStreak || 0} 🏆</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Partner / Rival elements
+        let partnerHtml = '';
+        if (data.bestPartner) {
+            partnerHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-between">
+                    <div>
+                        <div class="font-label-bold text-xs uppercase opacity-75 text-secondary">Best Partner</div>
+                        <div class="font-headline-md text-xl uppercase mt-1">${data.bestPartner.name}</div>
+                    </div>
+                    <div class="mt-4 border-t-2 border-on-background pt-2 flex justify-between items-center text-sm font-label-bold">
+                        <span>Win Rate:</span>
+                        <span class="text-green-700">${data.bestPartner.winRate}% (${data.bestPartner.wins}/${data.bestPartner.played})</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            partnerHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-center items-center text-center py-6">
+                    <span class="material-symbols-outlined text-4xl opacity-30">group</span>
+                    <div class="font-label-bold text-xs uppercase opacity-75 mt-2">No Partner Stats</div>
+                </div>
+            `;
+        }
+
+        let rivalHtml = '';
+        if (data.toughestRival) {
+            rivalHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-between">
+                    <div>
+                        <div class="font-label-bold text-xs uppercase opacity-75 text-red-700">Toughest Rival</div>
+                        <div class="font-headline-md text-xl uppercase mt-1">${data.toughestRival.name}</div>
+                    </div>
+                    <div class="mt-4 border-t-2 border-on-background pt-2 flex justify-between items-center text-sm font-label-bold">
+                        <span>Win Rate vs Them:</span>
+                        <span class="text-red-700">${data.toughestRival.winRateAgainst}% (${data.toughestRival.played - data.toughestRival.losses}/${data.toughestRival.played})</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            rivalHtml = `
+                <div class="border-2 border-on-background p-3 bg-white flex flex-col justify-center items-center text-center py-6">
+                    <span class="material-symbols-outlined text-4xl opacity-30">sports_tennis</span>
+                    <div class="font-label-bold text-xs uppercase opacity-75 mt-2">No Rival Stats</div>
+                </div>
+            `;
+        }
+
+        // Achievements/Badges
+        let badgesHtml = '';
+        if (data.badges && data.badges.length > 0) {
+            badgesHtml = `
+                <div class="border-2 border-on-background p-4 brutalist-shadow bg-surface-container-lowest flex flex-col gap-2">
+                    <h4 class="font-headline-sm text-headline-sm uppercase text-secondary">Achievements</h4>
+                    <div class="flex flex-wrap gap-2">
+                        ${data.badges.map(b => `
+                            <span class="bg-primary-container text-on-primary-container border-2 border-on-background px-3 py-1 font-label-bold text-xs uppercase brutalist-shadow">
+                                ${b}
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        container.innerHTML = `
+            ${streakHtml}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${partnerHtml}
+                ${rivalHtml}
+            </div>
+            ${badgesHtml}
+        `;
+    } catch (err) {
+        console.error('Failed to load profile insights:', err.message);
+    }
+}
+window.loadProfileInsights = loadProfileInsights;
+
+
+// ==========================================
 // 7. INITIALIZATION ON LOAD
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     updateAuthVisibility();
     navigate('home');
+
+    // Auto-hide header on scroll down
+    let lastScrollY = window.scrollY;
+    const header = document.querySelector('header');
+    window.addEventListener('scroll', () => {
+        if (!header) return;
+        const currentScrollY = window.scrollY;
+        
+        if (currentScrollY > lastScrollY && currentScrollY > 80) {
+            // Scrolling down - hide header
+            header.style.transform = 'translateY(-100%)';
+        } else {
+            // Scrolling up - show header
+            header.style.transform = 'translateY(0)';
+        }
+        
+        lastScrollY = currentScrollY;
+    });
 
     // Register Service Worker
     if ('serviceWorker' in navigator) {
