@@ -274,8 +274,8 @@ async function runSimulation() {
     { username: 'tp3', expected: 'Bob L.' }, // Colliding first name
     { username: 'tp4', expected: 'Alice' }, // Colliding but one has no last name
     { username: 'tp5', expected: 'Alice C.' }, // Colliding but other has no last name
-    { username: 'tp6', expected: 'John S.' }, // Colliding, identical initials
-    { username: 'tp7', expected: 'John S.' }, // Colliding, identical initials
+    { username: 'tp6', expected: 'John Smith 1' }, // Colliding, identical full names -> suffix 1
+    { username: 'tp7', expected: 'John Smith 2' }, // Colliding, identical full names -> suffix 2
   ];
 
   let nameDiffFailed = false;

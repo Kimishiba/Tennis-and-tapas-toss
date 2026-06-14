@@ -3,3 +3,4 @@ database.db
 vapid-keys.json
 .DS_Store
 uploads/
+whatsapp-session/

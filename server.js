@@ -163,34 +163,74 @@ export async function getDifferentiatedNamesMap() {
   if (!db) return new Map();
   const players = await db.all('SELECT id, name FROM players');
   const nameMap = new Map();
-  const groups = new Map();
 
-  for (const p of players) {
-    if (!p.name) continue;
-    const nameStr = p.name.trim();
+  // 1. Parse player names into structured info
+  const playerInfos = players.map(p => {
+    const nameStr = (p.name || '').trim();
     const parts = nameStr.split(/\s+/);
-    const firstName = parts[0];
+    const firstName = parts[0] || 'Player';
     const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
     const initial = (lastName && /^\d+$/.test(lastName)) ? lastName : (lastName ? lastName[0].toUpperCase() : '');
+    return {
+      id: p.id,
+      nameStr,
+      firstName,
+      initial,
+      displayName: firstName
+    };
+  });
 
-    const key = firstName.toLowerCase();
-    if (!groups.has(key)) {
-      groups.set(key, []);
+  // Helper to group by displayName (case-insensitive)
+  const getCollisionGroups = (infos) => {
+    const groups = new Map();
+    for (const info of infos) {
+      const key = info.displayName.toLowerCase();
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push(info);
     }
-    groups.get(key).push({ id: p.id, nameStr, firstName, initial });
-  }
+    return groups;
+  };
 
+  // Pass 2: Differentiate with initial if there is a collision on first name
+  let groups = getCollisionGroups(playerInfos);
   for (const [key, list] of groups.entries()) {
-    const isDuplicate = list.length > 1;
-    for (const item of list) {
-      if (isDuplicate && item.initial) {
-        const hasDot = !/^\d+$/.test(item.initial);
-        nameMap.set(item.id, `${item.firstName} ${item.initial}${hasDot ? '.' : ''}`);
-      } else {
-        nameMap.set(item.id, item.firstName);
+    if (list.length > 1) {
+      for (const info of list) {
+        if (info.initial) {
+          const hasDot = !/^\d+$/.test(info.initial);
+          info.displayName = `${info.firstName} ${info.initial}${hasDot ? '.' : ''}`;
+        }
       }
     }
   }
+
+  // Pass 3: Differentiate with full name if there is still a collision
+  groups = getCollisionGroups(playerInfos);
+  for (const [key, list] of groups.entries()) {
+    if (list.length > 1) {
+      for (const info of list) {
+        info.displayName = info.nameStr || info.displayName;
+      }
+    }
+  }
+
+  // Pass 4: Differentiate with a numeric suffix if there is STILL a collision
+  groups = getCollisionGroups(playerInfos);
+  for (const [key, list] of groups.entries()) {
+    if (list.length > 1) {
+      list.forEach((info, index) => {
+        info.displayName = `${info.displayName} ${index + 1}`;
+      });
+    }
+  }
+
+  // Build the final map
+  for (const info of playerInfos) {
+    nameMap.set(info.id, info.displayName);
+  }
+
   return nameMap;
 }
 
