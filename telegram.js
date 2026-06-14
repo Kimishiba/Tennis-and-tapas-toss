@@ -58,6 +58,12 @@ const parseHeuristics = (text) => {
     return { action: 'MOVE_PLAYER', playerA: match[1].trim(), courtName: match[2].trim() };
   }
 
+  // 5. Update level
+  match = t.match(/(?:set|change|update)\s+(?:the\s+)?(?:level\s+of\s+)?(.+?)(?:'s)?(?:\s+level)?\s+to\s+(?:level\s+)?(\d+)/i);
+  if (match) {
+    return { action: 'UPDATE_PLAYER_LEVEL', playerA: match[1].trim(), level: parseInt(match[2], 10) };
+  }
+
   return { action: 'UNKNOWN' };
 };
 
@@ -73,15 +79,17 @@ Intents support:
 2. RENAME_COURT: User wants to rename a specific court. E.g., "rename court 1 to Main Court".
 3. SWAP_PLAYERS: User wants to swap two players in the pairings. E.g., "swap Bob and Alice".
 4. MOVE_PLAYER: User wants to move a player to a specific court. E.g., "move Bob to Court 2".
+5. UPDATE_PLAYER_LEVEL: User wants to update a player's level. E.g., "set Alice level to 8", "change Bob's level to 5", "update Mark to level 6".
 
 Output EXACTLY a JSON block with the following fields:
 {
-  "action": "SET_COURTS" | "RENAME_COURT" | "SWAP_PLAYERS" | "MOVE_PLAYER" | "UNKNOWN",
+  "action": "SET_COURTS" | "RENAME_COURT" | "SWAP_PLAYERS" | "MOVE_PLAYER" | "UPDATE_PLAYER_LEVEL" | "UNKNOWN",
   "courts": ["Court A", "Court B"], // List of court names for SET_COURTS
-  "playerA": "Alice", // Player name for SWAP_PLAYERS or MOVE_PLAYER
+  "playerA": "Alice", // Player name for SWAP_PLAYERS, MOVE_PLAYER, or UPDATE_PLAYER_LEVEL
   "playerB": "Bob", // Player name to swap with for SWAP_PLAYERS
   "courtName": "Center Court", // Target court name for MOVE_PLAYER or RENAME_COURT
-  "oldCourtName": "Court 1" // Court name to change from for RENAME_COURT
+  "oldCourtName": "Court 1", // Court name to change from for RENAME_COURT
+  "level": 8 // New level number (1-9) for UPDATE_PLAYER_LEVEL
 }`;
 
   try {
@@ -184,7 +192,27 @@ async function handleNaturalLanguageManage(ctx, text) {
     }
 
     if (!intent || intent.action === 'UNKNOWN') {
-      return ctx.reply('🤔 Sorry, I couldn\'t understand that command. Try something like:\n• "swap John and Mark"\n• "move Alice to Court 2"\n• "we have 3 courts today"\n• "rename court 1 to Central"');
+      return ctx.reply('🤔 Sorry, I couldn\'t understand that command. Try something like:\n• "swap John and Mark"\n• "move Alice to Court 2"\n• "we have 3 courts today"\n• "rename court 1 to Central"\n• "set Alice level to 8"');
+    }
+
+    if (intent.action === 'UPDATE_PLAYER_LEVEL') {
+      const { playerA: pAName, level } = intent;
+      if (!pAName || level === undefined || isNaN(level) || level < 1 || level > 9) {
+        return ctx.reply('❌ Please specify a valid player name and level between 1 and 9.');
+      }
+
+      const query = pAName.toLowerCase().trim();
+      const allPlayers = await dbRef.all("SELECT id, name FROM players");
+      let foundPlayer = allPlayers.find(p => p.name.toLowerCase() === query);
+      if (!foundPlayer) foundPlayer = allPlayers.find(p => p.name.toLowerCase().startsWith(query));
+      if (!foundPlayer) foundPlayer = allPlayers.find(p => p.name.toLowerCase().includes(query));
+
+      if (!foundPlayer) {
+        return ctx.reply(`❌ Could not find player matching "${pAName}".`);
+      }
+
+      await dbRef.run("UPDATE players SET level = ? WHERE id = ?", [level, foundPlayer.id]);
+      return ctx.reply(`✅ Updated level of ${foundPlayer.name} to ${level}.`);
     }
 
     const session = await dbRef.get("SELECT * FROM sessions WHERE status = 'open' OR status = 'active' ORDER BY id DESC LIMIT 1");
@@ -390,6 +418,7 @@ async function handleNaturalLanguageManage(ctx, text) {
       await postUpdatedPairings(ctx, session.id, activeRound);
       return;
     }
+
 
   } catch (err) {
     console.error('[Telegram Bot] Error managing pairings:', err);
