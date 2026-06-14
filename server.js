@@ -302,10 +302,6 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
   const numCourts = finalCourtsConfig.length;
   const requiredPlayers = numCourts * 4;
 
-  if (approvedPlayers.length < requiredPlayers) {
-    throw new Error(`Pairings require at least ${requiredPlayers} approved players for ${numCourts} courts`);
-  }
-
   // Load all historical matches to compute partner & opponent frequencies
   const allMatches = await db.all(`
     SELECT player1, player2, player3, player4 FROM matches
@@ -319,9 +315,7 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
   `, [sessionId, roundNumber]);
 
   // Build history tracking maps
-  // partnerHistory: 'player1_id,player2_id' -> count of partnering
   const partnerHistory = new Map();
-  // opponentHistory: 'player1_id,player2_id' -> count of playing against each other
   const opponentHistory = new Map();
 
   function recordPartner(p1, p2, weight = 1) {
@@ -355,6 +349,17 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
   // Pick the top `requiredPlayers` to play this round
   const activePlayers = sortedPlayers.slice(0, requiredPlayers);
 
+  // Pad with Ghost players if we don't have enough players
+  while (activePlayers.length < requiredPlayers) {
+    const ghostId = -(activePlayers.length + 1);
+    activePlayers.push({
+      id: ghostId,
+      name: 'TBD',
+      gender: 'M',
+      level: 5
+    });
+  }
+
   // Record historical matches (weighted slightly lower or equal)
   for (const m of allMatches) {
     recordPartner(m.player1, m.player2, 1);
@@ -383,15 +388,14 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
   const avoidRepeats = rules.avoidRepeats !== false;
 
   // Scoring parameters
-  const PARTNER_REPEATED_PENALTY = avoidRepeats ? 100000 : 0; // Massively penalize re-partnering
+  const PARTNER_REPEATED_PENALTY = avoidRepeats ? 100000 : 0;
   const OPPONENT_REPEATED_PENALTY = avoidRepeats ? 1000 : 0;
-  const LEVEL_GAP_PENALTY = balanceLevels ? 100 : 0; // Penalty per level difference in match balance
-  const PARTNER_GAP_IDEAL = 4; // Preferred partner level gap <= 4
-  const PARTNER_GAP_SOFT_PENALTY = balanceLevels ? 1000 : 0; // Penalty for partner gap > 4
-  const PARTNER_GAP_HARD_LIMIT = 8; // Max partner gap
-  const PARTNER_GAP_HARD_PENALTY = balanceLevels ? 500000 : 0; // Penalty for partner gap > 8
+  const LEVEL_GAP_PENALTY = balanceLevels ? 100 : 0;
+  const PARTNER_GAP_IDEAL = 4;
+  const PARTNER_GAP_SOFT_PENALTY = balanceLevels ? 1000 : 0;
+  const PARTNER_GAP_HARD_LIMIT = 8;
+  const PARTNER_GAP_HARD_PENALTY = balanceLevels ? 500000 : 0;
 
-  // We will run a randomized search with hill-climbing to find the best configuration
   let bestPairing = null;
   let bestScore = Infinity;
 
@@ -405,11 +409,6 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
       [players[j], players[k]] = [players[k], players[j]];
     }
 
-    // Partition into 4 matches (4 courts):
-    // Match 1: Court 1: (P0, P1) vs (P2, P3)
-    // Match 2: Court 2: (P4, P5) vs (P6, P7)
-    // Match 3: Court 3: (P8, P9) vs (P10, P11)
-    // Match 4: Court 4: (P12, P13) vs (P14, P15)
     let score = 0;
     const currentMatches = [];
 
@@ -421,30 +420,31 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
       const p4 = players[offset + 3];
 
       // Partners: (p1, p2) and (p3, p4)
-      const p1_p2_key = p1.id < p2.id ? `${p1.id},${p2.id}` : `${p2.id},${p1.id}`;
-      const p3_p4_key = p3.id < p4.id ? `${p3.id},${p4.id}` : `${p4.id},${p3.id}`;
+      if (p1.id > 0 && p2.id > 0) {
+        const p1_p2_key = p1.id < p2.id ? `${p1.id},${p2.id}` : `${p2.id},${p1.id}`;
+        const p1_p2_repeats = partnerHistory.get(p1_p2_key) || 0;
+        score += p1_p2_repeats * PARTNER_REPEATED_PENALTY;
 
-      const p1_p2_repeats = partnerHistory.get(p1_p2_key) || 0;
-      const p3_p4_repeats = partnerHistory.get(p3_p4_key) || 0;
+        const gap1 = Math.abs(p1.level - p2.level);
+        if (gap1 > PARTNER_GAP_HARD_LIMIT) score += PARTNER_GAP_HARD_PENALTY;
+        else if (gap1 > PARTNER_GAP_IDEAL) score += (gap1 - PARTNER_GAP_IDEAL) * PARTNER_GAP_SOFT_PENALTY;
+      }
 
-      // Penalty for partner repetition
-      score += p1_p2_repeats * PARTNER_REPEATED_PENALTY;
-      score += p3_p4_repeats * PARTNER_REPEATED_PENALTY;
+      if (p3.id > 0 && p4.id > 0) {
+        const p3_p4_key = p3.id < p4.id ? `${p3.id},${p4.id}` : `${p4.id},${p3.id}`;
+        const p3_p4_repeats = partnerHistory.get(p3_p4_key) || 0;
+        score += p3_p4_repeats * PARTNER_REPEATED_PENALTY;
 
-      // Level gap restrictions for partners
-      const gap1 = Math.abs(p1.level - p2.level);
-      const gap2 = Math.abs(p3.level - p4.level);
+        const gap2 = Math.abs(p3.level - p4.level);
+        if (gap2 > PARTNER_GAP_HARD_LIMIT) score += PARTNER_GAP_HARD_PENALTY;
+        else if (gap2 > PARTNER_GAP_IDEAL) score += (gap2 - PARTNER_GAP_IDEAL) * PARTNER_GAP_SOFT_PENALTY;
+      }
 
-      if (gap1 > PARTNER_GAP_HARD_LIMIT) score += PARTNER_GAP_HARD_PENALTY;
-      else if (gap1 > PARTNER_GAP_IDEAL) score += (gap1 - PARTNER_GAP_IDEAL) * PARTNER_GAP_SOFT_PENALTY;
-
-      if (gap2 > PARTNER_GAP_HARD_LIMIT) score += PARTNER_GAP_HARD_PENALTY;
-      else if (gap2 > PARTNER_GAP_IDEAL) score += (gap2 - PARTNER_GAP_IDEAL) * PARTNER_GAP_SOFT_PENALTY;
-
-      // Match Balance (Team A sum vs Team B sum)
-      const teamASum = p1.level + p2.level;
-      const teamBSum = p3.level + p4.level;
-      score += Math.abs(teamASum - teamBSum) * LEVEL_GAP_PENALTY;
+      if (p1.id > 0 && p2.id > 0 && p3.id > 0 && p4.id > 0) {
+        const teamASum = p1.level + p2.level;
+        const teamBSum = p3.level + p4.level;
+        score += Math.abs(teamASum - teamBSum) * LEVEL_GAP_PENALTY;
+      }
 
       // Opponent rotation
       const opponents = [
@@ -452,29 +452,29 @@ export async function generatePairings(sessionId, roundNumber, approvedPlayers, 
         [p2.id, p3.id], [p2.id, p4.id]
       ];
       for (const [op1, op2] of opponents) {
-        const op_key = op1 < op2 ? `${op1},${op2}` : `${op2},${op1}`;
-        const op_repeats = opponentHistory.get(op_key) || 0;
-        score += op_repeats * OPPONENT_REPEATED_PENALTY;
+        if (op1 > 0 && op2 > 0) {
+          const op_key = op1 < op2 ? `${op1},${op2}` : `${op2},${op1}`;
+          const op_repeats = opponentHistory.get(op_key) || 0;
+          score += op_repeats * OPPONENT_REPEATED_PENALTY;
+        }
       }
 
       // Gender Match Weighting (Prefer Mixed Doubles 2M/2F split)
-      if (preferMixed) {
+      if (preferMixed && p1.id > 0 && p2.id > 0 && p3.id > 0 && p4.id > 0) {
         const courtGenders = [p1.gender, p2.gender, p3.gender, p4.gender];
         const mCount = courtGenders.filter(g => g === 'M').length;
         const fCount = courtGenders.filter(g => g === 'F').length;
 
         if (mCount === 2 && fCount === 2) {
-          // Ideal case 1: Mixed doubles (1M 1F on both teams)
           if (p1.gender !== p2.gender && p3.gender !== p4.gender) {
-            score += 0; // Perfect mixed doubles
+            score += 0;
           } else {
-            score += 150; // Same-gender teams playing each other (e.g. 2M vs 2F)
+            score += 150;
           }
         } else if (mCount === 4 || fCount === 4) {
-          score += 80; // All men or all women on court (very clean)
+          score += 80;
         } else {
-          // 3M 1F or 3F 1M (isolates one player)
-          score += 50000; // Heavily discouraged
+          score += 50000;
         }
       }
 
@@ -994,7 +994,7 @@ app.post('/api/sessions/:id/add-player', authenticateToken, requireAdmin, async 
   }
 });
 
-// Populate session with 16 approved test players (Admin only)
+// Populate session with a custom count of approved test players (Admin only)
 app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req, res) => {
   try {
     let session = await db.get("SELECT * FROM sessions WHERE status = 'open' OR status = 'active' ORDER BY id DESC LIMIT 1");
@@ -1004,47 +1004,43 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
       session = { id: insertRes.lastID, date: today, status: 'open' };
     }
 
-    const existingPlayers = await db.all("SELECT id FROM players WHERE username != 'admin'");
-    const playersNeeded = Math.max(0, 16 - existingPlayers.length);
-    
-    if (playersNeeded > 0) {
-      const maxPlayer = await db.get("SELECT MAX(id) as max_id FROM players");
-      const startIdx = (maxPlayer?.max_id || 0) + 1;
-      const genders = ['M', 'F'];
-      const maleNames = ['Alessandro', 'Javier', 'Richard', 'John', 'Arthur', 'Bob', 'Frank', 'David', 'George', 'Harry', 'Ethan', 'Liam', 'Michael', 'Thomas', 'James', 'Daniel'];
-      const femaleNames = ['Sofia', 'Alice', 'Fiona', 'Emma', 'Helen', 'Diana', 'Grace', 'Beatrice', 'Chloe', 'Olivia', 'Ava', 'Isabella', 'Mia', 'Charlotte', 'Amelia', 'Sophia'];
-      const lastNames = ['Longoni', 'Perez', 'Smith', 'Cooper', 'Miller', 'Jones', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'White', 'Harris', 'Martin', 'Clark'];
+    const count = parseInt(req.body.count, 10) || 16;
+    const genders = ['M', 'F'];
+    const maxPlayer = await db.get("SELECT MAX(id) as max_id FROM players");
+    const startIdx = (maxPlayer?.max_id || 0) + 1;
+    const maleNames = ['Alessandro', 'Javier', 'Richard', 'John', 'Arthur', 'Bob', 'Frank', 'David', 'George', 'Harry', 'Ethan', 'Liam', 'Michael', 'Thomas', 'James', 'Daniel'];
+    const femaleNames = ['Sofia', 'Alice', 'Fiona', 'Emma', 'Helen', 'Diana', 'Grace', 'Beatrice', 'Chloe', 'Olivia', 'Ava', 'Isabella', 'Mia', 'Charlotte', 'Amelia', 'Sophia'];
+    const lastNames = ['Longoni', 'Perez', 'Smith', 'Cooper', 'Miller', 'Jones', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'White', 'Harris', 'Martin', 'Clark'];
 
-      for (let i = 0; i < playersNeeded; i++) {
-        const idx = startIdx + i;
-        const gender = genders[i % 2];
-        const firstName = gender === 'M'
-          ? maleNames[Math.floor(Math.random() * maleNames.length)]
-          : femaleNames[Math.floor(Math.random() * femaleNames.length)];
-        const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-        const name = `${firstName} ${lastName}`;
-        const cleanName = firstName.toLowerCase().replace(/[^a-z]/g, '');
-        const username = `${cleanName}${idx}@example.com`;
+    const newPlayerIds = [];
+    for (let i = 0; i < count; i++) {
+      const idx = startIdx + i;
+      const gender = genders[i % 2];
+      const firstName = gender === 'M'
+        ? maleNames[Math.floor(Math.random() * maleNames.length)]
+        : femaleNames[Math.floor(Math.random() * femaleNames.length)];
+      const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+      const name = `${firstName} ${lastName}`;
+      const cleanName = firstName.toLowerCase().replace(/[^a-z]/g, '');
+      const username = `${cleanName}${idx}@example.com`;
 
-        const level = Math.floor(Math.random() * 9) + 1;
-        await db.run(
-          "INSERT INTO players (name, gender, level, username, is_admin) VALUES (?, ?, ?, ?, 0)",
-          [name, gender, level, username]
-        );
-      }
+      const level = Math.floor(Math.random() * 9) + 1;
+      const insertRes = await db.run(
+        "INSERT INTO players (name, gender, level, username, is_admin) VALUES (?, ?, ?, ?, 0)",
+        [name, gender, level, username]
+      );
+      newPlayerIds.push(insertRes.lastID);
     }
 
-    await db.run("DELETE FROM signups WHERE session_id = ?", [session.id]);
-
-    const allPlayers = await db.all("SELECT id FROM players WHERE username != 'admin' LIMIT 16");
-    for (const player of allPlayers) {
+    // Now sign up and approve all these new players in the session
+    for (const pId of newPlayerIds) {
       await db.run(
-        "INSERT INTO signups (session_id, player_id, status) VALUES (?, ?, 'approved')",
-        [session.id, player.id]
+        "INSERT OR IGNORE INTO signups (session_id, player_id, status) VALUES (?, ?, 'approved')",
+        [session.id, pId]
       );
     }
 
-    res.json({ message: 'Successfully filled session with 16 approved players' });
+    res.json({ message: `Successfully added ${count} approved players on top of the roster` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1095,9 +1091,8 @@ app.post('/api/sessions/:id/generate-round', authenticateToken, requireAdmin, as
       WHERE s.session_id = ? AND s.status = 'approved'
     `, [sessionId]);
 
-    const requiredPlayers = courtsConfig.length * 4;
-    if (approvedPlayers.length < requiredPlayers) {
-      return res.status(400).json({ error: `At least ${requiredPlayers} approved players are required for ${courtsConfig.length} courts. Currently there are ${approvedPlayers.length} approved players.` });
+    if (approvedPlayers.length === 0) {
+      return res.status(400).json({ error: 'At least 1 approved player is required to generate pairings.' });
     }
 
     // Determine the next round number

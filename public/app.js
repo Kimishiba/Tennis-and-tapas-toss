@@ -613,36 +613,39 @@ function validateAdminGeneration() {
     const generateBtn = document.getElementById('admin-generate-btn');
     const statusEl = document.getElementById('admin-pairing-status');
 
+    if (generateBtn) generateBtn.disabled = false;
     if (approvedCount >= requiredPlayers) {
-        if (generateBtn) generateBtn.disabled = false;
         if (statusEl) {
             statusEl.textContent = `Roster has ${approvedCount} approved players. Ready to generate pairings for ${numCourts} courts!`;
             statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-green-700";
         }
     } else {
-        if (generateBtn) generateBtn.disabled = true;
         if (statusEl) {
-            statusEl.textContent = `Need at least ${requiredPlayers} approved players for ${numCourts} courts (currently ${approvedCount} approved).`;
-            statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-red-700";
+            statusEl.textContent = `Warning: Need at least ${requiredPlayers} approved players for ${numCourts} courts (currently ${approvedCount} approved). Missing positions will be filled with 'TBD'.`;
+            statusEl.className = "font-label-bold text-label-sm uppercase mb-4 text-amber-600";
         }
     }
 }
 
-async function fillRoster16() {
+async function fillRosterCustom() {
     if (!activeSession) return alert('No active session scheduled.');
-    if (!confirm('Are you sure you want to populate this session with 16 approved test players?')) return;
+    const countSelect = document.getElementById('fill-count-select');
+    const count = countSelect ? parseInt(countSelect.value, 10) : 16;
+    if (!confirm(`Are you sure you want to add ${count} approved test players to the current roster?`)) return;
 
     try {
         const res = await fetch(`${API_URL}/api/admin/fill-players`, {
             method: 'POST',
             headers: {
+                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
-            }
+            },
+            body: JSON.stringify({ count })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        alert('Roster successfully populated with 16 approved players!');
+        alert(data.message);
         loadDashboardData();
     } catch (err) {
         alert('Failed to fill roster: ' + err.message);
@@ -751,6 +754,13 @@ async function generateRoundDraft() {
     if (!activeSession) return;
     try {
         const numCourts = parseInt(document.getElementById('num-courts-select').value, 10);
+        const approvedCount = currentAdminSignups.filter(s => s.status === 'approved').length;
+        const requiredPlayers = numCourts * 4;
+        if (approvedCount < requiredPlayers) {
+            const confirmed = confirm(`Warning: You only have ${approvedCount} approved players, but ${requiredPlayers} are required for ${numCourts} courts (4 players per court). Missing positions will be filled with 'TBD'. Do you still want to generate pairings?`);
+            if (!confirmed) return;
+        }
+
         const courtsConfig = [];
         for (let i = 1; i <= numCourts; i++) {
             const val = document.getElementById(`court-label-${i}`)?.value || `${i}`;
