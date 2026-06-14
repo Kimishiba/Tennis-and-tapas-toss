@@ -13,6 +13,24 @@ import { OAuth2Client } from 'google-auth-library';
 import { initWhatsApp, sendGroupNotification, getWhatsAppStatus } from './whatsapp.js';
 import { initTelegram, sendTelegramNotification } from './telegram.js';
 
+export const logBuffer = [];
+const originalLog = console.log;
+const originalError = console.error;
+
+console.log = (...args) => {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  logBuffer.push({ type: 'info', time: new Date().toISOString(), msg });
+  if (logBuffer.length > 200) logBuffer.shift();
+  originalLog(...args);
+};
+
+console.error = (...args) => {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  logBuffer.push({ type: 'error', time: new Date().toISOString(), msg });
+  if (logBuffer.length > 200) logBuffer.shift();
+  originalError(...args);
+};
+
 const googleClient = new OAuth2Client();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1085,6 +1103,26 @@ app.post('/api/admin/clear-database', authenticateToken, requireAdmin, async (re
 app.get('/api/admin/whatsapp-status', authenticateToken, requireAdmin, async (req, res) => {
   try {
     res.json(getWhatsAppStatus());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Check overall bot connection status and logs
+app.get('/api/bot-status', async (req, res) => {
+  try {
+    res.json({
+      telegram: {
+        tokenSet: !!process.env.TELEGRAM_BOT_TOKEN,
+        tokenPreview: process.env.TELEGRAM_BOT_TOKEN ? (process.env.TELEGRAM_BOT_TOKEN.substring(0, 6) + '...') : null,
+        groupChatIdSet: !!process.env.TELEGRAM_GROUP_CHAT_ID,
+        geminiKeySet: !!process.env.GEMINI_API_KEY
+      },
+      whatsapp: {
+        connected: getWhatsAppStatus ? (getWhatsAppStatus()?.status === 'connected') : false
+      },
+      logs: logBuffer
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
