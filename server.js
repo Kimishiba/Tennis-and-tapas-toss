@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { OAuth2Client } from 'google-auth-library';
+import { initWhatsApp, sendGroupNotification } from './whatsapp.js';
 
 const googleClient = new OAuth2Client();
 
@@ -145,6 +146,11 @@ async function initDb() {
     );
     console.log('Default admin created (username: admin, password: adminpassword)');
   }
+
+  // Initialize WhatsApp in the background
+  initWhatsApp(dbDir).catch(err => {
+    console.error('Failed to initialize WhatsApp connection:', err);
+  });
 }
 
 /**
@@ -1052,6 +1058,25 @@ app.post('/api/sessions/:id/publish-round', authenticateToken, requireAdmin, asy
       };
       // Send custom push notification per court to make it personal
       await sendPushNotification(matchPlayers.map(p => p.id), payload);
+    }
+
+    // Trigger WhatsApp Group Notification in background
+    try {
+      let waMessage = `🎾 *Round ${round_number} Pairings Published!* 🎾\n\n`;
+      for (const match of pairings) {
+        const p1_name = nameMap.get(match.player1.id) || match.player1.name;
+        const p2_name = nameMap.get(match.player2.id) || match.player2.name;
+        const p3_name = nameMap.get(match.player3.id) || match.player3.name;
+        const p4_name = nameMap.get(match.player4.id) || match.player4.name;
+        waMessage += `*Court ${match.court}:* ${p1_name} & ${p2_name} vs ${p3_name} & ${p4_name}\n`;
+      }
+      waMessage += `\nGood luck everyone! 🏆`;
+      
+      sendGroupNotification(waMessage).catch(err => {
+        console.error('Failed to send WhatsApp group notification:', err);
+      });
+    } catch (waErr) {
+      console.error('Error constructing WhatsApp group notification:', waErr);
     }
 
     res.json({ message: `Round ${round_number} published successfully and notifications sent` });

@@ -17,7 +17,10 @@
     "multer": "^1.4.5-lts.1",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.1.0",
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
     "@flydotio/dockerfile": "^0.7.10"
