@@ -635,6 +635,28 @@ async function fillRoster16() {
     }
 }
 
+async function clearDatabase() {
+    if (!confirm('WARNING: This will permanently delete all players (except admins), sessions, signups, and match history. This action cannot be undone. Are you sure you want to proceed?')) {
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_URL}/api/admin/clear-database`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        alert(data.message);
+        loadDashboardData();
+    } catch (err) {
+        alert('Failed to clear database: ' + err.message);
+    }
+}
+
 async function manuallyAddPlayerPrompt() {
     if (!activeSession) return alert('No active session scheduled.');
 

@@ -1000,6 +1000,20 @@ app.post('/api/admin/fill-players', authenticateToken, requireAdmin, async (req,
   }
 });
 
+// Clear all sessions, matches, signups, and non-admin players (Admin only)
+app.post('/api/admin/clear-database', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await db.run("DELETE FROM signups");
+    await db.run("DELETE FROM matches");
+    await db.run("DELETE FROM sessions");
+    await db.run("DELETE FROM players WHERE is_admin = 0");
+    await db.run("VACUUM");
+    res.json({ message: 'Database cleared successfully. All sessions, signups, matches, and non-admin players have been reset.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Round & Pairing Endpoints ---
 
 // Generate next draft round (Admin only)
