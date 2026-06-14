@@ -627,6 +627,94 @@ export async function initTelegram(dbInstance, helpers = {}) {
       }
     });
 
+    // Command to check system status: /status
+    bot.command('status', async (ctx) => {
+      try {
+        const chatId = ctx.chat.id;
+        const userId = ctx.from.id;
+
+        // Verify if sender is a group admin
+        let isAdmin = false;
+        if (ctx.chat.type === 'private') {
+          isAdmin = true;
+        } else {
+          const chatMember = await ctx.telegram.getChatMember(chatId, userId);
+          isAdmin = chatMember.status === 'administrator' || chatMember.status === 'creator';
+        }
+
+        if (!isAdmin) {
+          return ctx.reply('❌ Only group administrators can check system status.');
+        }
+
+        // 1. Telegram status
+        const tgStatus = isConnected ? '✅ Connected' : '❌ Disconnected';
+
+        // 2. WhatsApp status
+        let waStatus = '⚠️ Status unavailable';
+        if (serverHelpers.getWhatsAppStatus) {
+          const wa = serverHelpers.getWhatsAppStatus();
+          if (wa.isConnected) {
+            waStatus = '✅ Connected';
+          } else if (wa.qr) {
+            waStatus = '🔄 Awaiting QR scan (check server logs)';
+          } else {
+            waStatus = '❌ Disconnected';
+          }
+        }
+
+        // 3. Active session info
+        let sessionInfo = 'No active session';
+        let playerCount = 0;
+        let roundInfo = 'No rounds yet';
+        const session = await dbRef.get("SELECT * FROM sessions WHERE status = 'open' OR status = 'active' ORDER BY id DESC LIMIT 1");
+        if (session) {
+          const approved = await dbRef.all(
+            "SELECT player_id FROM signups WHERE session_id = ? AND status = 'approved'",
+            [session.id]
+          );
+          playerCount = approved.length;
+          sessionInfo = `#${session.id} — ${session.date} (${session.status})`;
+
+          const lastMatch = await dbRef.get('SELECT MAX(round_number) as max_round FROM matches WHERE session_id = ?', [session.id]);
+          if (lastMatch?.max_round) {
+            const matchCount = await dbRef.get('SELECT COUNT(*) as cnt FROM matches WHERE session_id = ? AND round_number = ?', [session.id, lastMatch.max_round]);
+            roundInfo = `Round ${lastMatch.max_round} (${matchCount.cnt} courts)`;
+          }
+        }
+
+        // 4. Environment hints
+        const hasTgGroupId = !!process.env.TELEGRAM_GROUP_CHAT_ID;
+        const hasWaGroupJid = !!process.env.WHATSAPP_GROUP_JID;
+        const hasGeminiKey = !!process.env.GEMINI_API_KEY;
+
+        const statusText =
+          `📊 *System Status*\n\n` +
+          `*Telegram Bot:* ${tgStatus}\n` +
+          `*WhatsApp Client:* ${waStatus}\n\n` +
+          `*Active Session:* ${sessionInfo}\n` +
+          `*Checked-in Players:* ${playerCount}\n` +
+          `*Current Round:* ${roundInfo}\n\n` +
+          `*Config:*\n` +
+          `• TG Group Chat ID: ${hasTgGroupId ? '✅ Set' : '⚠️ Not set'}\n` +
+          `• WA Group JID: ${hasWaGroupJid ? '✅ Set' : '⚠️ Not set (using default)'}\n` +
+          `• Gemini API Key: ${hasGeminiKey ? '✅ Set' : '⚠️ Not set (heuristics only)'}`;
+
+        await ctx.replyWithMarkdownV2(
+          statusText
+            .replace(/\./g, '\\.')
+            .replace(/-/g, '\\-')
+            .replace(/!/g, '\\!')
+            .replace(/\(/g, '\\(')
+            .replace(/\)/g, '\\)')
+            .replace(/\+/g, '\\+')
+            .replace(/#/g, '\\#')
+        );
+      } catch (err) {
+        console.error('[Telegram Bot] Error in /status command:', err);
+        await ctx.reply(`❌ Error fetching status: ${err.message}`);
+      }
+    });
+
     // General message listener for direct message management or group mentions
     bot.on('message', async (ctx) => {
       try {
@@ -672,11 +760,12 @@ export async function initTelegram(dbInstance, helpers = {}) {
     });
 
     // Start / Help Commands
-    const helpMessage = `📖 *Tennis & Tapas Toss Bot Commands*:\n\n` +
+    const helpMessage = `📖 *Tennis \& Tapas Toss Bot Commands*:\n\n` +
       `• /in \\- Check yourself in using your Telegram name\\.\n` +
       `• /in \\[Name\\], \\[Gender: M/F\\], \\[Level: 1\\-9\\] \\- Check in with custom details \\(e\\.g\\. \`/in Sofia, F, 6\`\\)\\.\n` +
       `• /generate \\- \\(Admins only\\) Generate pairings for the active session\\.\n` +
       `• /manage \\[Instruction\\] \\- \\(Admins only\\) Manage courts or pairings naturally \\(e\\.g\\. \`/manage swap John and Mark\`\\).\n` +
+      `• /status \\- \\(Admins only\\) Check system connectivity \\& session info\\.\n` +
       `• /help \\- Show this guide\\.`;
 
     bot.start(async (ctx) => {
@@ -692,6 +781,7 @@ export async function initTelegram(dbInstance, helpers = {}) {
       { command: 'in', description: 'Check in to play' },
       { command: 'generate', description: 'Generate pairings (Admins only)' },
       { command: 'manage', description: 'Manage courts or pairings naturally' },
+      { command: 'status', description: 'Check system connectivity & session info (Admins)' },
       { command: 'help', description: 'Show available commands' }
     ]).catch(err => console.error('[Telegram Bot] Failed to register menu commands:', err));
 

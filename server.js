@@ -186,7 +186,8 @@ async function initDb() {
   initTelegram(db, {
     generatePairings,
     getDifferentiatedNamesMap,
-    sendWhatsAppNotification: sendGroupNotification
+    sendWhatsAppNotification: sendGroupNotification,
+    getWhatsAppStatus
   }).catch(err => {
     console.error('Failed to initialize Telegram connection:', err);
   });
