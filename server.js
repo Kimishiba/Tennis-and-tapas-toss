@@ -171,7 +171,7 @@ export async function getDifferentiatedNamesMap() {
     const parts = nameStr.split(/\s+/);
     const firstName = parts[0];
     const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
-    const initial = lastName ? lastName[0].toUpperCase() : '';
+    const initial = (lastName && /^\d+$/.test(lastName)) ? lastName : (lastName ? lastName[0].toUpperCase() : '');
 
     const key = firstName.toLowerCase();
     if (!groups.has(key)) {
@@ -184,7 +184,8 @@ export async function getDifferentiatedNamesMap() {
     const isDuplicate = list.length > 1;
     for (const item of list) {
       if (isDuplicate && item.initial) {
-        nameMap.set(item.id, `${item.firstName} ${item.initial}.`);
+        const hasDot = !/^\d+$/.test(item.initial);
+        nameMap.set(item.id, `${item.firstName} ${item.initial}${hasDot ? '.' : ''}`);
       } else {
         nameMap.set(item.id, item.firstName);
       }
