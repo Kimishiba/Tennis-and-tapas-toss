@@ -612,13 +612,16 @@ export async function initWhatsApp(dbDir, dbInstance, helpers = {}) {
     // Group Message Commands Listener
     sock.ev.on('messages.upsert', async (m) => {
       const msg = m.messages[0];
-      if (!msg.message || msg.key.fromMe) return;
-
-      const groupJid = process.env.WHATSAPP_GROUP_JID || '120363408671601030@g.us';
-      if (msg.key.remoteJid !== groupJid) return;
+      if (!msg.message) return;
 
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
       if (!text) return;
+
+      // Allow fromMe messages only if they are commands (starting with '!') so the owner can test/run commands
+      if (msg.key.fromMe && !text.startsWith('!')) return;
+
+      const groupJid = process.env.WHATSAPP_GROUP_JID || '120363408671601030@g.us';
+      if (msg.key.remoteJid !== groupJid) return;
 
       // Helper to guess gender
       const guessGender = (name) => {
