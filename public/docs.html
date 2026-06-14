@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tennis & Tapas Toss API Docs</title>
+  <!-- Outfit Font from Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Source+Code+Pro:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="redoc-container"></div>
+  <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+  <script>
+    Redoc.init('/openapi.yaml', {
+      theme: {
+        colors: {
+          primary: {
+            main: '#3b82f6'
+          },
+          success: {
+            main: '#10b981'
+          },
+          warning: {
+            main: '#f59e0b'
+          },
+          error: {
+            main: '#ef4444'
+          },
+          text: {
+            primary: '#1e293b',
+            secondary: '#64748b'
+          },
+          responses: {
+            success: {
+              color: '#10b981',
+              backgroundColor: '#ecfdf5'
+            },
+            error: {
+              color: '#ef4444',
+              backgroundColor: '#fef2f2'
+            }
+          }
+        },
+        typography: {
+          fontSize: '15px',
+          lineHeight: '1.6',
+          fontFamily: 'Outfit, sans-serif',
+          headings: {
+            fontFamily: 'Outfit, sans-serif',
+            fontWeight: '600'
+          },
+          code: {
+            fontFamily: 'Source Code Pro, monospace',
+            fontSize: '13px'
+          }
+        },
+        rightPanel: {
+          backgroundColor: '#0f172a',
+          width: '40%'
+        }
+      }
+    }, document.getElementById('redoc-container'));
+  </script>
+</body>
+</html>

@@ -1490,6 +1490,11 @@ app.get('/api/leaderboard', authenticateToken, async (req, res) => {
   }
 });
 
+// Expose OpenAPI specification file
+app.get('/openapi.yaml', (req, res) => {
+  res.sendFile(path.join(__dirname, 'openapi.yaml'));
+});
+
 // Close database on exit
 process.on('SIGINT', async () => {
   if (db) await db.close();

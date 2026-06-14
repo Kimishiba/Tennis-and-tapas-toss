@@ -13,6 +13,7 @@ Depending on the workspace context and development tasks, the following agent ty
 *   **Lead Agent (Antigravity)**: Coordinates the overall development plan, interacts with the user, structures task workflows, and integrates components.
 *   **Research Agent (`research`)**: A read-only specialist dedicated to broad codebase analysis, dependency audits, external API lookups, and developer documentation reviews.
 *   **Subagent/Self Agent (`self`)**: Subagents spawned to handle isolated, parallel tasks in branched or shared workspaces (e.g., writing tests, setting up containerization, refactoring specific modules).
+*   **API Documenter Agent (`api-documenter`)**: Specializes in creating and updating OpenAPI specifications, developer portals, SDK docs, and API-related integration/migration workflows.
 
 ## Coordination & Best Practices
 
