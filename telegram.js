@@ -632,6 +632,7 @@ export async function initTelegram(dbInstance, helpers = {}) {
       try {
         const chatId = ctx.chat.id;
         const userId = ctx.from.id;
+        console.log(`[Telegram Bot] /status command run. Chat ID: ${chatId} (Type: ${ctx.chat.type})`);
 
         // Verify if sender is a group admin
         let isAdmin = false;
@@ -719,6 +720,9 @@ export async function initTelegram(dbInstance, helpers = {}) {
     bot.on('message', async (ctx) => {
       try {
         const text = ctx.message?.text || '';
+        if (ctx.chat.type !== 'private') {
+          console.log(`[Telegram Bot] Message in group/channel. Chat ID: ${ctx.chat.id}, Text: "${text}"`);
+        }
         if (!text) return;
 
         // Skip commands
