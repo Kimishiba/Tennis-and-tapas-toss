@@ -932,6 +932,26 @@ app.get('/api/sessions/current', authenticateToken, async (req, res) => {
   }
 });
 
+// Update courts configuration (Admin only)
+app.put('/api/sessions/:id/courts', authenticateToken, requireAdmin, async (req, res) => {
+  const sessionId = req.params.id;
+  const { courtsConfig } = req.body;
+
+  if (!courtsConfig || !Array.isArray(courtsConfig)) {
+    return res.status(400).json({ error: 'Valid courts configuration required' });
+  }
+
+  try {
+    const session = await db.get('SELECT * FROM sessions WHERE id = ?', [sessionId]);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    await db.run("UPDATE sessions SET courts_json = ? WHERE id = ?", [JSON.stringify(courtsConfig), sessionId]);
+    res.json({ message: 'Courts configuration updated successfully', courtsConfig });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Complete session (Admin only)
 app.post('/api/sessions/:id/complete', authenticateToken, requireAdmin, async (req, res) => {
   const sessionId = req.params.id;

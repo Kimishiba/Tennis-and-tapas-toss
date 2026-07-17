@@ -836,6 +836,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/sessions/{id}/courts:
+    put:
+      summary: Set active courts configuration for the session (Admin only)
+      operationId: updateCourtsConfig
+      description: Update the active courts configuration (stored in courts_json) for the session.
+      tags:
+        - Administration
+        - Tournament Sessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The ID of the session
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                courtsConfig:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      courtNumber:
+                        type: string
+                    required:
+                      - courtNumber
+              required:
+                - courtsConfig
+      responses:
+        '200':
+          description: Courts configuration updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  courtsConfig:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        courtNumber:
+                          type: string
+        '400':
+          description: Invalid courts configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AdminRequired'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Server error
           content:

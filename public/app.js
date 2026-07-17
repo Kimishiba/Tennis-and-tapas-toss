@@ -587,17 +587,29 @@ function populateAdminPairingControls(signups) {
     if (adminPanel) adminPanel.classList.remove('hidden');
     if (completeContainer) completeContainer.classList.remove('hidden');
     
-    // Auto-select max possible courts based on current approved players
     const approvedCount = currentAdminSignups.filter(s => s.status === 'approved').length;
     const numCourtsSelect = document.getElementById('num-courts-select');
-    if (numCourtsSelect && approvedCount > 0) {
-        const possibleCourts = Math.min(4, Math.floor(approvedCount / 4));
-        if (possibleCourts >= 1) {
-            numCourtsSelect.value = possibleCourts.toString();
+    if (numCourtsSelect) {
+        let courtsConfig = null;
+        if (activeSession && activeSession.courts_json) {
+            try {
+                courtsConfig = JSON.parse(activeSession.courts_json);
+            } catch (e) {
+                console.error('Failed to parse courts_json:', e);
+            }
+        }
+        
+        if (courtsConfig && Array.isArray(courtsConfig) && courtsConfig.length > 0) {
+            numCourtsSelect.value = courtsConfig.length.toString();
+            updateCourtInputs(courtsConfig);
+        } else if (approvedCount > 0) {
+            const possibleCourts = Math.min(4, Math.floor(approvedCount / 4));
+            numCourtsSelect.value = (possibleCourts >= 1 ? possibleCourts : 1).toString();
+            updateCourtInputs();
         } else {
             numCourtsSelect.value = "1";
+            updateCourtInputs();
         }
-        updateCourtInputs();
     }
 
     loadRulePreferences();
@@ -734,19 +746,59 @@ async function createNewSession() {
 }
 
 // Dynamically generate court label inputs based on the selected number of courts
-function updateCourtInputs() {
+function updateCourtInputs(loadedConfig = null) {
     const numCourts = parseInt(document.getElementById('num-courts-select').value, 10);
     const container = document.getElementById('court-labels-container');
     container.innerHTML = '';
     for (let i = 1; i <= numCourts; i++) {
+        let labelVal = i.toString();
+        if (loadedConfig && loadedConfig[i - 1]) {
+            const item = loadedConfig[i - 1];
+            labelVal = (typeof item === 'string') ? item : (item.courtNumber || i.toString());
+        }
         container.innerHTML += `
             <div class="flex flex-col gap-2">
                 <label class="font-label-bold text-label-sm uppercase text-outline">Court ${i} Label</label>
-                <input type="text" id="court-label-${i}" value="${i}" class="bg-white border-2 border-on-background p-3 font-body-md focus:ring-4 focus:ring-primary-container outline-none transition-all">
+                <input type="text" id="court-label-${i}" value="${labelVal}" onchange="saveCourtsConfig()" class="bg-white border-2 border-on-background p-3 font-body-md focus:ring-4 focus:ring-primary-container outline-none transition-all">
             </div>
         `;
     }
     validateAdminGeneration();
+    
+    // Only auto-save if we didn't just load this from the database
+    if (!loadedConfig) {
+        saveCourtsConfig();
+    }
+}
+
+async function saveCourtsConfig() {
+    if (!activeSession) return;
+    const numCourtsSelect = document.getElementById('num-courts-select');
+    if (!numCourtsSelect) return;
+    const numCourts = parseInt(numCourtsSelect.value, 10);
+    const courtsConfig = [];
+    for (let i = 1; i <= numCourts; i++) {
+        const val = document.getElementById(`court-label-${i}`)?.value || `${i}`;
+        courtsConfig.push({ courtNumber: val });
+    }
+    
+    try {
+        const res = await fetch(`${API_URL}/api/sessions/${activeSession.id}/courts`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ courtsConfig })
+        });
+        const data = await res.json();
+        if (data.error) console.error('Failed to save courts config:', data.error);
+        else {
+            activeSession.courts_json = JSON.stringify(courtsConfig);
+        }
+    } catch (err) {
+        console.error('Error saving courts config:', err);
+    }
 }
 
 // Generate round draft matches (hill-climbing logic client-side preview)
@@ -1049,7 +1101,7 @@ function populateActiveMatches(matches) {
             </div>
             
             <div class="flex justify-between items-center">
-                <div class="space-y-1">
+                <div class="space-y-1 flex flex-col items-start">
                     ${renderPlayer(p1_name, m.player1, mIndex, 'player1', isDraft)}
                     ${renderPlayer(p2_name, m.player2, mIndex, 'player2', isDraft)}
                 </div>

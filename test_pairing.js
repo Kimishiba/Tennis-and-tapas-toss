@@ -27,7 +27,8 @@ async function runSimulation() {
     CREATE TABLE IF NOT EXISTS sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
-      status TEXT CHECK(status IN ('open', 'active', 'completed')) DEFAULT 'open'
+      status TEXT CHECK(status IN ('open', 'active', 'completed')) DEFAULT 'open',
+      courts_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS signups (
